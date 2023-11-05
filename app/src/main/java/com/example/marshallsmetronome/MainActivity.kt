@@ -1,10 +1,10 @@
 package com.example.marshallsmetronome
 
-// TODO: Implement reset
-// TODO: Implement pause, and resume
 // TODO: Implement jumping to input fields that have errors
-// TODO: Fewer magic numbers, more constants, in case eg, othe interval types are added
+// TODO: Fewer magic numbers, more constants, in case eg, other interval types are added
+// TODO: Run all the lints and other static checks.
 // TODO: Unit tests / Integration tests?
+// TODO: Upload to github
 // TODO: Deploy somewhere, eg Play Store or somewhere free maybe Firebase?
 
 import android.os.Bundle
@@ -88,6 +88,9 @@ class RunningState(
     )
     val secondsRemainingInAllCycles: State<Int> = _secondsRemainingInAllCycles
 
+    private var _isPaused = mutableStateOf<Boolean>(false)
+    fun isPaused(): Boolean = _isPaused.value
+
     private var _currentIntervalType =
         mutableStateOf<IntervalType>(Constants.FirstIntervalTypeInCycle)
     val currentIntervalType: State<IntervalType> = _currentIntervalType
@@ -107,6 +110,12 @@ class RunningState(
         var currentIntervalNum = 1
 
         while (true) {
+            // Do nothing while paused.
+            while (_isPaused.value) {
+                delay(100)
+            }
+
+            // Not paused, so delay a bit, then continue our logic for this loop iteration.
             delay(100)
 
             // decrease remaining milliseconds in current interval by 100, but don't go past 0:
@@ -163,6 +172,15 @@ class RunningState(
         // TODO: Test this
         countdownJob.cancel()
     }
+
+    fun pause() {
+        _isPaused.value = true
+    }
+
+    fun resume() {
+        _isPaused.value = false
+    }
+
 }
 
 private fun getSecondsForAllCycles(
@@ -331,13 +349,30 @@ fun MarshallsMetronome(modifier: Modifier = Modifier) {
                             )
                         }
                     } else {
-                        // We're running, so pause
-                        println("TODO: Implement pause")
+                        // We're running, but are we currently paused?
+                        if (runningState?.isPaused() == true) {
+                            // We are paused, so resume.
+                            runningState?.resume()
+                        } else {
+                            // We are not paused, so pause.
+                            runningState?.pause()
+                        }
                     }
                 }
             ) {
+                // If we're not yet running, then show Start.
+                // Otherwise, if we are running, but are paused, show Resume.
+                // Otherwise, if we are running, and are not paused, then show Pause.
+                val buttonText = if (runningState == null) {
+                    "Start"
+                } else if (runningState?.isPaused() == true) {
+                    "Resume"
+                } else {
+                    "Pause"
+                }
+
                 Text(
-                    text = "Start",
+                    text = buttonText,
                     modifier = modifier
                 )
             }
@@ -345,7 +380,10 @@ fun MarshallsMetronome(modifier: Modifier = Modifier) {
             Spacer(modifier = modifier.width(10.dp))
 
             Button(
-                onClick = {}
+                onClick = {
+                    runningState?.shutdown()
+                    runningState = null
+                }
             ) {
                 Text(
                     text = "Reset",
