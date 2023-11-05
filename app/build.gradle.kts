@@ -72,6 +72,6 @@ dependencies {
 
 tasks.withType<KotlinCompile>().configureEach {
     kotlinOptions {
-        freeCompilerArgs += listOf("-Xopt-in=androidx.compose.material3.ExperimentalMaterial3Api")
+        freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
     }
 }
