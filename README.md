@@ -1,5 +1,7 @@
 # Marshall's Metronome: Tabata Timer for Android
 
+[Download](https://github.com/wizzardx/MarshallsMetronome/releases)
+
 Introducing "Marshall's Metronome," a personalized Tabata Timer Android app, crafted to meet the specifications requested by Marshall. This app simplifies the execution of [Tabata](https://en.wikipedia.org/wiki/High-intensity_interval_training#Tabata_regimen) workouts, a form of high-intensity interval training renowned for its efficiency and effectiveness.
 
 ## Sneak Peek of the App:
