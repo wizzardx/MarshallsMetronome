@@ -5,6 +5,8 @@ package com.example.marshallsmetronome
 // TODO: Deploy somewhere, eg Play Store or somewhere free maybe Firebase?
 // TODO: Setup CI/CD?
 
+import android.app.Application
+import android.media.MediaPlayer
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -37,7 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.marshallsmetronome.ui.theme.MarshallsMetronomeTheme
 import kotlinx.coroutines.CoroutineScope
@@ -134,6 +136,11 @@ class RunningState(
      * How many seconds of rest per cycle. Usually 10.
      */
     val restSecondsPerCycle: Int,
+
+    /**
+     * Callback function to play a beep noise.
+     */
+    val playBeep: () -> Unit,
 ) {
     private var _secondsRemainingInAllCycles = mutableStateOf(
         getSecondsForAllCycles(
@@ -200,6 +207,15 @@ class RunningState(
             _secondsRemainingInAllCycles.value = (
                 millisecondsRemainingInAllCycles / Constants.MillisecondsPerSecond
                 ).toInt()
+
+            // If we've just reached the last second of the rest cycle, then play a beep noise.
+            // At the moment I don't know why this coincides with the exact visible end of the
+            // rest cycle in the UI (0 seconds).
+            if (millisecondsRemainingInInterval == Constants.MillisecondsPerSecond &&
+                _currentIntervalType.value == IntervalType.Rest
+            ) {
+                playBeep()
+            }
 
             // Did we reach the end of the current interval?
             if (millisecondsRemainingInInterval == 0) {
@@ -332,10 +348,11 @@ private fun getErrorInfoFor(error: String?): Pair<(@Composable (() -> Unit))?, B
 /**
  * ViewModel to help separate business logic from UI logic.
  */
-class MarshallsMetronomeViewModel : ViewModel() {
-
+class MarshallsMetronomeViewModel(application: Application) : AndroidViewModel(application) {
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
     private var runningState: MutableState<RunningState?> = mutableStateOf(null)
+
+    private var mediaPlayer: MediaPlayer? = null
 
     /**
      * Input that we've received from the "Cycles" TextField.
@@ -443,6 +460,14 @@ class MarshallsMetronomeViewModel : ViewModel() {
         return timeString
     }
 
+    fun playBeep() {
+        mediaPlayer?.release()
+        mediaPlayer = MediaPlayer.create(getApplication(), R.raw.beep).apply {
+            start()
+            setOnCompletionListener { it.release() }
+        }
+    }
+
     /**
      * Called when the user clicks the Start/Pause/Resume button.
      */
@@ -471,7 +496,8 @@ class MarshallsMetronomeViewModel : ViewModel() {
                     coroutineScope = coroutineScope,
                     cycles = totalCyclesInput.toInt(),
                     workSecondsPerCycle = secondsWorkInput.toInt(),
-                    restSecondsPerCycle = secondsRestInput.toInt()
+                    restSecondsPerCycle = secondsRestInput.toInt(),
+                    playBeep = ::playBeep,
                 )
             }
         } else {
@@ -490,8 +516,7 @@ class MarshallsMetronomeViewModel : ViewModel() {
      * Called when the user clicks the Reset button.
      */
     fun onResetClick() {
-        runningState.value?.shutdown()
-        runningState.value = null
+        clearResources()
     }
 
     /**
@@ -499,6 +524,10 @@ class MarshallsMetronomeViewModel : ViewModel() {
      */
     fun clearResources() {
         runningState.value?.shutdown()
+        runningState.value = null
+
+        mediaPlayer?.release()
+        mediaPlayer = null
     }
 
     override fun onCleared() {
