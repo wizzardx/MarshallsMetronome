@@ -1,13 +1,10 @@
 package com.example.marshallsmetronome
 
-// TODO: Unit tests / Integration tests?
-// TODO: Upload to github
-// TODO: Deploy somewhere, eg Play Store or somewhere free maybe Firebase?
-// TODO: Setup CI/CD?
-
-import android.app.Application
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
@@ -32,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,22 +37,49 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.marshallsmetronome.ui.theme.MarshallsMetronomeTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 /**
  * The main activity for our app. The android runtime calls this logic.
  */
 class MainActivity : ComponentActivity() {
+    private var mediaPlayer: MediaPlayer? = null
+    private var errorMessage = mutableStateOf<String?>(null)
+
+    private fun playBeep() {
+        mediaPlayer?.let {
+            if (it.isPlaying) {
+                it.stop()
+                it.prepare() // Prepare the MediaPlayer to start from the beginning
+            }
+            it.start()
+        } ?: run {
+            // MediaPlayer is null. Handle the case here.
+            errorMessage.value = "MediaPlayer is not initialized."
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    // Catching a generic exception intentionally for top-level error logging
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        try {
+            mediaPlayer = MediaPlayer.create(this, R.raw.beep)
+            if (mediaPlayer == null) {
+                // MediaPlayer creation failed.
+                errorMessage.value = "Error creating MediaPlayer instance."
+            }
+        } catch (e: Exception) {
+            errorMessage.value = "Exception in MediaPlayer initialization: ${e.message}"
+            Log.e("MainActivity", "Exception in MediaPlayer initialization", e)
+        }
+
         setContent {
             MarshallsMetronomeTheme {
                 // A surface container using the 'background' color from the theme
@@ -62,10 +87,22 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MarshallsMetronome()
+                    MarshallsMetronome(
+                        viewModel = MarshallsMetronomeViewModel(::playBeep),
+                        errorMessage = errorMessage,
+                    )
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        if (mediaPlayer?.isPlaying == true) {
+            mediaPlayer?.stop()
+        }
+        mediaPlayer?.release()
+        mediaPlayer = null
+        super.onDestroy()
     }
 }
 
@@ -204,9 +241,7 @@ class RunningState(
             // Do the same with remaining milliseconds in all the cycles:
             millisecondsRemainingInAllCycles =
                 (millisecondsRemainingInAllCycles - Constants.SmallDelay).coerceAtLeast(0)
-            _secondsRemainingInAllCycles.value = (
-                millisecondsRemainingInAllCycles / Constants.MillisecondsPerSecond
-                ).toInt()
+            _secondsRemainingInAllCycles.value = millisecondsRemainingInAllCycles / Constants.MillisecondsPerSecond
 
             // If we've just reached the last second of the rest cycle, then play a beep noise.
             // At the moment I don't know why this coincides with the exact visible end of the
@@ -245,7 +280,7 @@ class RunningState(
                 // Over here we go from eg, 0 seconds remaining of a work interval, to
                 // 9 seconds (rather than 10 seconds) remaining of the rest interval
                 _secondsRemainingInCurrentInterval.value =
-                    (millisecondsRemainingInInterval / Constants.MillisecondsPerSecond).toInt() - 1
+                    millisecondsRemainingInInterval / Constants.MillisecondsPerSecond - 1
 
                 // Go to the next cycle if we just completed a previous cycle:
                 if (justFinishedACycle) {
@@ -283,76 +318,14 @@ class RunningState(
     }
 }
 
-private fun getSecondsForAllCycles(
-    cycles: Int,
-    workSecondsPerCycle: Int,
-    restSecondsPerCycle: Int
-) = (workSecondsPerCycle + restSecondsPerCycle) * cycles
-
-private fun getSecondsForFirstInterval(
-    workSecondsPerCycle: Int
-) = workSecondsPerCycle
-
-private fun formatMinSec(totalSeconds: Int): String {
-    val minutes = totalSeconds / Constants.SecondsPerMinute
-    val seconds = totalSeconds % Constants.SecondsPerMinute
-    return String.format(Locale.ROOT, "%02d:%02d", minutes, seconds)
-}
-
-private fun normaliseIntInput(s: String): String {
-    // Go through the string, and remove any non-numeric characters.
-    // Don't allow 0 at the start of the number. But if there is no number at the
-    // end, then our result is 0
-    var result = ""
-    var foundNonZero = false
-    for (c in s) {
-        if (c.isDigit()) {
-            if (c != '0') {
-                foundNonZero = true
-            }
-            if (foundNonZero) {
-                result += c
-            }
-        }
-    }
-    return result
-}
-
-private fun validateIntInput(value: String): String? {
-    val intVal = value.toIntOrNull()
-    return when {
-        intVal == null -> "Invalid number"
-        intVal < 1 -> "Must be at least 1"
-        intVal > Constants.MaxUserInputNum -> "Must be at most 100"
-        else -> null // valid input
-    }
-}
-
-private fun getErrorInfoFor(error: String?): Pair<(@Composable (() -> Unit))?, Boolean> {
-    return if (error == null) {
-        Pair(null, false)
-    } else {
-        Pair(
-            {
-                Text(
-                    text = error,
-                    color = Color.Red,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            true
-        )
-    }
-}
-
 /**
  * ViewModel to help separate business logic from UI logic.
  */
-class MarshallsMetronomeViewModel(application: Application) : AndroidViewModel(application) {
+class MarshallsMetronomeViewModel(
+    private val playBeep: () -> Unit = {},
+) {
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
     private var runningState: MutableState<RunningState?> = mutableStateOf(null)
-
-    private var mediaPlayer: MediaPlayer? = null
 
     /**
      * Input that we've received from the "Cycles" TextField.
@@ -383,6 +356,8 @@ class MarshallsMetronomeViewModel(application: Application) : AndroidViewModel(a
      * Error message for the "Rest" TextField.
      */
     var secondsRestInputError by mutableStateOf<String?>(null)
+
+    private var _cachedAppVersion: String? = null
 
     /**
      * Return the text to display on the Start/Pause/Resume button.
@@ -460,12 +435,8 @@ class MarshallsMetronomeViewModel(application: Application) : AndroidViewModel(a
         return timeString
     }
 
-    fun playBeep() {
-        mediaPlayer?.release()
-        mediaPlayer = MediaPlayer.create(getApplication(), R.raw.beep).apply {
-            start()
-            setOnCompletionListener { it.release() }
-        }
+    private fun playBeep() {
+        this.playBeep.invoke()
     }
 
     /**
@@ -525,15 +496,123 @@ class MarshallsMetronomeViewModel(application: Application) : AndroidViewModel(a
     fun clearResources() {
         runningState.value?.shutdown()
         runningState.value = null
-
-        mediaPlayer?.release()
-        mediaPlayer = null
     }
 
-    override fun onCleared() {
-        clearResources()
-        super.onCleared()
+    /**
+     * Return the version number of our app.
+     */
+    // We specifically want to catch the NameNotFoundException exception here, and return
+    // "Unknown" if we can't get the version number. We don't care about the other details
+    // related to the exception. Also, we catch the NullPointerException so that we can
+    // show the Preview.
+    @Suppress("SwallowedException", "TooGenericExceptionCaught")
+    fun getAppVersion(context: Context): String {
+        // Return cached app version if we have it already:
+        if (_cachedAppVersion != null) {
+            return _cachedAppVersion!!
+        }
+        // Otherwise, cache and return the app version:
+        _cachedAppVersion = try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            // This part lets us use the Preview again:
+            try {
+                packageInfo.versionName
+            } catch (e: NullPointerException) {
+                "NULL_POINTER_EXCEPTION"
+            }
+        } catch (e: PackageManager.NameNotFoundException) {
+            "Unknown"
+        }
+        return _cachedAppVersion!!
     }
+}
+
+/**
+ * Display the total time remaining for the entire workout.
+ */
+@Composable
+fun TotalTimeRemainingView(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
+    Text(
+        text = viewModel.formatTotalTimeRemainingString(),
+        fontSize = 50.sp,
+        modifier = modifier,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/***
+ * Display the Start/Pause/Resume and Reset buttons.
+ */
+@Composable
+fun ControlButtons(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
+    Row {
+        Button(onClick = { viewModel.onButtonClick() }) {
+            Text(text = viewModel.buttonText, modifier = modifier)
+        }
+
+        Spacer(modifier = modifier.width(10.dp))
+
+        Button(onClick = { viewModel.onResetClick() }) {
+            Text(text = "Reset", modifier = modifier)
+        }
+    }
+}
+
+/***
+ * Display the current cycle number.
+ */
+@Composable
+fun CurrentCycleNumberView(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
+    Text(
+        text = viewModel.formatCurrentCycleNumber(),
+        fontSize = 90.sp,
+        modifier = modifier,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/***
+ * Display the configuration input fields.
+ */
+@Composable
+fun ConfigInputFields(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
+    // Configure cycles (eg, 8):
+    InputTextField(
+        InputTextFieldParams(
+            errorMessage = viewModel.totalCyclesInputError,
+            value = viewModel.totalCyclesInput,
+            onValueChange = { viewModel.totalCyclesInput = normaliseIntInput(it) },
+            labelText = "Cycles",
+            modifier = modifier,
+            enabled = viewModel.textInputControlsEnabled
+        )
+    )
+
+    // Configure Work (seconds, eg 20):
+    InputTextField(
+        InputTextFieldParams(
+            errorMessage = viewModel.secondsWorkInputError,
+            value = viewModel.secondsWorkInput,
+            onValueChange = { viewModel.secondsWorkInput = normaliseIntInput(it) },
+            labelText = "Work",
+            modifier = modifier,
+            enabled = viewModel.textInputControlsEnabled,
+        )
+    )
+
+    // Configure Rest (seconds, eg 10):
+    InputTextField(
+        InputTextFieldParams(
+            errorMessage = viewModel.secondsRestInputError,
+            value = viewModel.secondsRestInput,
+            onValueChange = { viewModel.secondsRestInput = normaliseIntInput(it) },
+            labelText = "Rest",
+            modifier = modifier,
+            enabled = viewModel.textInputControlsEnabled
+        )
+    )
 }
 
 /**
@@ -542,7 +621,8 @@ class MarshallsMetronomeViewModel(application: Application) : AndroidViewModel(a
 @Composable
 fun MarshallsMetronome(
     modifier: Modifier = Modifier,
-    viewModel: MarshallsMetronomeViewModel = viewModel()
+    errorMessage: State<String?> = mutableStateOf(null),
+    viewModel: MarshallsMetronomeViewModel = MarshallsMetronomeViewModel(),
 ) {
     /**
      * Also make sure that we shut down the coroutine and it's timer, etc, at the end when we're
@@ -562,17 +642,9 @@ fun MarshallsMetronome(
             .padding(30.dp)
     ) {
         // Total time remaining
-
-        Text(
-            text = viewModel.formatTotalTimeRemainingString(),
-            fontSize = 50.sp,
-            modifier = modifier,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        TotalTimeRemainingView(viewModel, modifier)
 
         // Seconds remaining in current interval
-
         Text(
             text = viewModel.formatCurrentIntervalTime(),
             maxLines = 1,
@@ -583,81 +655,73 @@ fun MarshallsMetronome(
         )
 
         // Current cycle number
+        CurrentCycleNumberView(viewModel, modifier)
 
+        // Start/Pause and Reset buttons
+        ControlButtons(viewModel, modifier)
+
+        // Configuration Input Fields
+        ConfigInputFields(viewModel, modifier)
+
+        // Padding so that everything after this point gets pushed to the bottom of the screen.
+        Spacer(modifier = modifier.weight(1f))
+
+        // Error message at the bottom of the screen, if applicable:
+        if (errorMessage.value != null) {
+            Text(
+                text = "ERROR: ${errorMessage.value}",
+                color = Color.Red,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        // Version number of our app:
         Text(
-            text = viewModel.formatCurrentCycleNumber(),
-            fontSize = 90.sp,
+            text = "Version: ${viewModel.getAppVersion(LocalContext.current)}",
             modifier = modifier,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-
-        // Start/Pause and Reset buttons
-        Row {
-            Button(onClick = { viewModel.onButtonClick() }) {
-                Text(text = viewModel.buttonText, modifier = modifier)
-            }
-
-            Spacer(modifier = modifier.width(10.dp))
-
-            Button(onClick = { viewModel.onResetClick() }) {
-                Text(text = "Reset", modifier = modifier)
-            }
-        }
-
-        // Configure cycles (eg, 8):
-        InputTextField(
-            errorMessage = viewModel.totalCyclesInputError,
-            value = viewModel.totalCyclesInput,
-            onValueChange = { viewModel.totalCyclesInput = normaliseIntInput(it) },
-            labelText = "Cycles",
-            modifier = modifier,
-            enabled = viewModel.textInputControlsEnabled
-        )
-
-        // Configure Work (seconds, eg 20):
-        InputTextField(
-            errorMessage = viewModel.secondsWorkInputError,
-            value = viewModel.secondsWorkInput,
-            onValueChange = { viewModel.secondsWorkInput = normaliseIntInput(it) },
-            labelText = "Work",
-            modifier = modifier,
-            enabled = viewModel.textInputControlsEnabled,
-        )
-
-        // Configure Rest (seconds, eg 10):
-        InputTextField(
-            errorMessage = viewModel.secondsRestInputError,
-            value = viewModel.secondsRestInput,
-            onValueChange = { viewModel.secondsRestInput = normaliseIntInput(it) },
-            labelText = "Rest",
-            modifier = modifier,
-            enabled = viewModel.textInputControlsEnabled
-        )
     }
 }
+
+/**
+ * Data class representing parameters for the InputTextField composable function.
+ *
+ * This class encapsulates all the parameters needed for customizing the appearance
+ * and behavior of the InputTextField.
+ *
+ * @property errorMessage An optional error message to display. If non-null, the TextField
+ *                        indicates an error state.
+ * @property value The current text to be displayed in the TextField.
+ * @property onValueChange Callback function to be invoked when the text changes.
+ * @property labelText The label text to be displayed above the TextField.
+ * @property modifier Modifier for styling and layout of the TextField.
+ * @property enabled Flag to indicate whether the TextField is enabled or disabled.
+ */
+data class InputTextFieldParams(
+    val errorMessage: String?,
+    val value: String,
+    val onValueChange: (String) -> Unit,
+    val labelText: String,
+    val modifier: Modifier = Modifier,
+    val enabled: Boolean
+)
 
 /***
  * Customized TextField used by our app.
  */
 @Composable
-fun InputTextField(
-    errorMessage: String?,
-    value: String,
-    onValueChange: (String) -> Unit,
-    labelText: String,
-    modifier: Modifier = Modifier,
-    enabled: Boolean,
-) {
-    val (supportingText, isError) = getErrorInfoFor(errorMessage)
+fun InputTextField(params: InputTextFieldParams) {
+    val (supportingText, isError) = getErrorInfoFor(params.errorMessage)
     TextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = params.value,
+        onValueChange = params.onValueChange,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         singleLine = true,
-        label = { Text(text = labelText) },
-        modifier = modifier.padding(top = 20.dp),
-        enabled = enabled,
+        label = { Text(text = params.labelText) },
+        modifier = params.modifier.padding(top = 20.dp),
+        enabled = params.enabled,
         supportingText = supportingText,
         isError = isError,
     )
