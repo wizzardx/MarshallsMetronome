@@ -179,18 +179,13 @@ class RunningState(
      */
     val playBeep: () -> Unit,
 ) {
-    private var _secondsRemainingInAllCycles = mutableStateOf(
+    private var _millisecondsRemainingInAllCycles = mutableStateOf(
         getSecondsForAllCycles(
             cycles = cycles,
             workSecondsPerCycle = workSecondsPerCycle,
             restSecondsPerCycle = restSecondsPerCycle
-        )
+        ) * Constants.MillisecondsPerSecond
     )
-
-    /**
-     * How many seconds remain for the entire workout program.
-     */
-    val secondsRemainingInAllCycles: State<Int> = _secondsRemainingInAllCycles
 
     private var _isPaused = mutableStateOf(false)
 
@@ -209,19 +204,21 @@ class RunningState(
      */
     val currentCycleNum: State<Int> = _currentCycleNum
 
-    private var _secondsRemainingInCurrentInterval =
-        mutableStateOf(getSecondsForFirstInterval(workSecondsPerCycle = workSecondsPerCycle))
-
-    /**
-     * How many seconds remain in the current interval, eg, 20 seconds of work, or 10 seconds of
-     * rest.
-     */
-    val secondsRemainingInCurrentInterval: State<Int> = _secondsRemainingInCurrentInterval
+    private var _millisecondsRemainingInCurrentInterval: MutableState<Int> =
+        mutableStateOf(
+            getSecondsForFirstInterval(
+                workSecondsPerCycle = workSecondsPerCycle
+            ) * Constants.MillisecondsPerSecond
+        )
 
     private var countdownJob: Job = coroutineScope.launch {
-        var millisecondsRemainingInInterval = workSecondsPerCycle * Constants.MillisecondsPerSecond
-        var millisecondsRemainingInAllCycles =
-            (workSecondsPerCycle + restSecondsPerCycle) * cycles * Constants.MillisecondsPerSecond
+        // Flags that we use to track if state just changed:
+        var currentIntervalJustEnded: Boolean
+        var currentCycleJustEnded: Boolean
+        var workoutJustEnded: Boolean
+
+        // Keep track of whether a beep has been triggered for the end of the current cycle:
+        var beepTriggered = false
 
         while (true) {
             // Do nothing while paused.
@@ -233,62 +230,87 @@ class RunningState(
             delay(Constants.SmallDelay.toLong())
 
             // decrease remaining milliseconds in current interval by 100, but don't go past 0:
-            millisecondsRemainingInInterval =
-                (millisecondsRemainingInInterval - Constants.SmallDelay).coerceAtLeast(0)
-            _secondsRemainingInCurrentInterval.value =
-                millisecondsRemainingInInterval / Constants.MillisecondsPerSecond
+            _millisecondsRemainingInCurrentInterval.value =
+                (_millisecondsRemainingInCurrentInterval.value - Constants.SmallDelay).coerceAtLeast(0)
 
             // Do the same with remaining milliseconds in all the cycles:
-            millisecondsRemainingInAllCycles =
-                (millisecondsRemainingInAllCycles - Constants.SmallDelay).coerceAtLeast(0)
-            _secondsRemainingInAllCycles.value = millisecondsRemainingInAllCycles / Constants.MillisecondsPerSecond
+            _millisecondsRemainingInAllCycles.value =
+                (_millisecondsRemainingInAllCycles.value - Constants.SmallDelay).coerceAtLeast(0)
 
-            // If we've just reached the last second of the rest cycle, then play a beep noise.
-            // At the moment I don't know why this coincides with the exact visible end of the
-            // rest cycle in the UI (0 seconds).
-            if (millisecondsRemainingInInterval == Constants.MillisecondsPerSecond &&
-                _currentIntervalType.value == IntervalType.Rest
+            // Set flags based on the current timings.
+
+            // Set a flag if we've just reached the end of the current interval.
+            currentIntervalJustEnded = _millisecondsRemainingInCurrentInterval.value <= 0
+
+            // Set a flag if we've just reached the end of the current cycle.
+            currentCycleJustEnded = currentIntervalJustEnded &&
+                _currentIntervalType.value == Constants.LastIntervalTypeInCycle
+
+            // Set a flag if we've just reached the end of the entire workout.
+            workoutJustEnded = _millisecondsRemainingInAllCycles.value == 0
+
+            // If we're in the last interval in a cycle, and the time remaining in the interval is
+            // less than 1000 milliseconds, and we haven't triggered the beep yet, then trigger
+            // the beep now:
+            if (_currentIntervalType.value == Constants.LastIntervalTypeInCycle &&
+                _millisecondsRemainingInCurrentInterval.value < Constants.MillisecondsPerSecond &&
+                !beepTriggered
             ) {
                 playBeep()
+                beepTriggered = true
             }
 
-            // Did we reach the end of the current interval?
-            if (millisecondsRemainingInInterval == 0) {
-
-                // Did we also just reach the end of the last cycle?
-                if (millisecondsRemainingInAllCycles == 0) {
-                    // Yes, so we're done. Break out of the loop, also meaning that
-                    // the coroutine terminates.
-                    break
-                }
-
-                // Did we just finish a cycle?
-                val justFinishedACycle =
-                    _currentIntervalType.value == Constants.LastIntervalTypeInCycle
-
-                // Switch over to next interval type
+            // If the current interval just ended and we aren't at the end of the workout:
+            if (currentIntervalJustEnded && !workoutJustEnded) {
+                //  Switch to the next interval type
                 _currentIntervalType.value = when (_currentIntervalType.value) {
                     IntervalType.Work -> IntervalType.Rest
                     IntervalType.Rest -> IntervalType.Work
                 }
 
-                // Switch over to seconds remaining of the next interval
-                millisecondsRemainingInInterval = when (_currentIntervalType.value) {
-                    IntervalType.Work -> workSecondsPerCycle * Constants.MillisecondsPerSecond
-                    IntervalType.Rest -> restSecondsPerCycle * Constants.MillisecondsPerSecond
-                }
-                // Over here we go from eg, 0 seconds remaining of a work interval, to
-                // 9 seconds (rather than 10 seconds) remaining of the rest interval
-                _secondsRemainingInCurrentInterval.value =
-                    millisecondsRemainingInInterval / Constants.MillisecondsPerSecond - 1
+                // Reset time remaining in the interval, based on the new interval type:
+                _millisecondsRemainingInCurrentInterval.value =
+                    getSecsCurrentInterval() * Constants.MillisecondsPerSecond
+            }
 
-                // Go to the next cycle if we just completed a previous cycle:
-                if (justFinishedACycle) {
-                    _currentCycleNum.value++
-                }
+            // If the current cycle just ended then:
+            if (currentCycleJustEnded) {
+                // Update the current cycle number, so long as it doesn't go past the
+                // total number of cycles:
+                _currentCycleNum.value = (_currentCycleNum.value + 1).coerceAtMost(cycles)
+
+                // Now reset the flag that indicated that a beep has played for the end of the
+                // cycle
+                beepTriggered = false
+            }
+
+            // If the entire workout just ended then:
+            if (workoutJustEnded) {
+                // Stop this loop, we're done with all our logic.
+                break
             }
         }
     }
+
+    /**
+     * Return how many seconds remain for the entire workout program.
+     */
+    fun getSecondsRemainingInAllCycles() = _millisecondsRemainingInAllCycles.value / Constants.MillisecondsPerSecond
+
+    /***
+     * Return how many seconds thera are total, for the current interval (type), eg, 20 seconds of work, or 10 seconds
+     * of rest.
+     */
+    fun getSecsCurrentInterval() = when (_currentIntervalType.value) {
+        IntervalType.Work -> workSecondsPerCycle
+        IntervalType.Rest -> restSecondsPerCycle
+    }
+
+    /**
+     * Return how many seconds remain in the current interval, eg, 20 seconds of work, or 10 seconds of rest.
+     */
+    fun getSecsLeftCurrInterval() =
+        _millisecondsRemainingInCurrentInterval.value / Constants.MillisecondsPerSecond
 
     /**
      * Returns true if we are currently paused.
@@ -394,7 +416,7 @@ class MarshallsMetronomeViewModel(
     fun formatTotalTimeRemainingString(): String {
         var timeString = formatMinSec(getTotalSecondsForAllCycles())
 
-        runningState.value?.secondsRemainingInAllCycles?.value?.let {
+        runningState.value?.getSecondsRemainingInAllCycles()?.let {
             timeString = formatMinSec(it)
         }
 
@@ -408,12 +430,22 @@ class MarshallsMetronomeViewModel(
         var timeString = "Work: ${secondsWorkInput.toIntOrNull() ?: 0}"
 
         runningState.value?.currentIntervalType?.value?.let { intervalType ->
-            runningState.value?.secondsRemainingInCurrentInterval?.value?.let { secondsRemainingInCurrentInterval ->
+            runningState.value?.getSecsLeftCurrInterval()?.let { secondsRemainingInCurrentInterval ->
+
+                // As a workaround to avoid having seconds of new intervals show briefly (100 mss and then jump down),
+                // when our seconds is at the maximum value for the interval, then we bump it down here instead.
+                val totalSeconds = runningState.value?.getSecsCurrentInterval()
+                val secondsPart = if (secondsRemainingInCurrentInterval == totalSeconds) {
+                    secondsRemainingInCurrentInterval - 1
+                } else {
+                    secondsRemainingInCurrentInterval
+                }
+
                 val intervalTypeName = when (intervalType) {
                     IntervalType.Work -> "Work"
                     IntervalType.Rest -> "Rest"
                 }
-                timeString = "$intervalTypeName: $secondsRemainingInCurrentInterval"
+                timeString = "$intervalTypeName: $secondsPart"
             }
         }
 
