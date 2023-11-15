@@ -20,7 +20,7 @@ Sound effect licenses:
   - Source: https://freesound.org/people/Omachronic/packs/8156/
   - Note: Edited further for use in this project.
 
-- referree_whistle.mp3
+- referee_whistle.mp3
   - Creator: SpliceSound
   - License: Creative Commons 0
   - Source: https://freesound.org/people/SpliceSound/sounds/218318/
