@@ -3,6 +3,7 @@ package com.example.marshallsmetronome
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -51,12 +52,18 @@ class MainActivity : ComponentActivity() {
     private var mediaPlayer: MediaPlayer? = null
     private var errorMessage = mutableStateOf<String?>(null)
 
-    private fun playBeep() {
+    private fun playSound(soundResourceId: Int) {
         mediaPlayer?.let {
             if (it.isPlaying) {
                 it.stop()
-                it.prepare() // Prepare the MediaPlayer to start from the beginning
             }
+            it.reset()
+
+            val context: Context = this@MainActivity
+            val uri = Uri.parse("android.resource://${context.packageName}/$soundResourceId")
+            it.setDataSource(context, uri)
+
+            it.prepare()
             it.start()
         } ?: run {
             // MediaPlayer is null. Handle the case here.
@@ -70,7 +77,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         try {
-            mediaPlayer = MediaPlayer.create(this, R.raw.beep)
+            mediaPlayer = MediaPlayer()
             if (mediaPlayer == null) {
                 // MediaPlayer creation failed.
                 errorMessage.value = "Error creating MediaPlayer instance."
@@ -88,7 +95,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MarshallsMetronome(
-                        viewModel = MarshallsMetronomeViewModel(::playBeep),
+                        viewModel = MarshallsMetronomeViewModel(::playSound),
                         errorMessage = errorMessage,
                     )
                 }
@@ -175,9 +182,9 @@ class RunningState(
     val restSecondsPerCycle: Int,
 
     /**
-     * Callback function to play a beep noise.
+     * Callback function to play a noise.
      */
-    val playBeep: () -> Unit,
+    val playSound: (soundResourceId: Int) -> Unit,
 ) {
     private var _millisecondsRemainingInAllCycles = mutableStateOf(
         getSecondsForAllCycles(
@@ -217,8 +224,8 @@ class RunningState(
         var currentCycleJustEnded: Boolean
         var workoutJustEnded: Boolean
 
-        // Keep track of whether a beep has been triggered for the end of the current cycle:
-        var beepTriggered = false
+        // Keep track of whether the buzzer noise has been triggered for the end of the current cycle:
+        var endOfCycleBuzzerTriggered = false
 
         while (true) {
             // Do nothing while paused.
@@ -254,10 +261,10 @@ class RunningState(
             // the beep now:
             if (_currentIntervalType.value == Constants.LastIntervalTypeInCycle &&
                 _millisecondsRemainingInCurrentInterval.value < Constants.MillisecondsPerSecond &&
-                !beepTriggered
+                !endOfCycleBuzzerTriggered
             ) {
-                playBeep()
-                beepTriggered = true
+                playSound(R.raw.buzzer)
+                endOfCycleBuzzerTriggered = true
             }
 
             // If the current interval just ended and we aren't at the end of the workout:
@@ -281,7 +288,7 @@ class RunningState(
 
                 // Now reset the flag that indicated that a beep has played for the end of the
                 // cycle
-                beepTriggered = false
+                endOfCycleBuzzerTriggered = false
             }
 
             // If the entire workout just ended then:
@@ -344,7 +351,7 @@ class RunningState(
  * ViewModel to help separate business logic from UI logic.
  */
 class MarshallsMetronomeViewModel(
-    private val playBeep: () -> Unit = {},
+    private val playSound: (Int) -> Unit = {},
 ) {
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
     private var runningState: MutableState<RunningState?> = mutableStateOf(null)
@@ -467,8 +474,8 @@ class MarshallsMetronomeViewModel(
         return timeString
     }
 
-    private fun playBeep() {
-        this.playBeep.invoke()
+    private fun playSound(soundResourceId: Int) {
+        this.playSound.invoke(soundResourceId)
     }
 
     /**
@@ -500,7 +507,7 @@ class MarshallsMetronomeViewModel(
                     cycles = totalCyclesInput.toInt(),
                     workSecondsPerCycle = secondsWorkInput.toInt(),
                     restSecondsPerCycle = secondsRestInput.toInt(),
-                    playBeep = ::playBeep,
+                    playSound = ::playSound,
                 )
             }
         } else {
