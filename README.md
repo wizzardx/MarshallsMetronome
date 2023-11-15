@@ -2,15 +2,26 @@
 
 [Download](https://github.com/wizzardx/MarshallsMetronome/releases)
 
-Introducing "Marshall's Metronome," a personalized Tabata Timer Android app, crafted to meet the specifications requested by Marshall. This app simplifies the execution of [Tabata](https://en.wikipedia.org/wiki/High-intensity_interval_training#Tabata_regimen) workouts, a form of high-intensity interval training renowned for its efficiency and effectiveness.
+## Introduction
+"Marshall's Metronome" is a personalized Tabata Timer Android app developed as a family project. This app simplifies the execution of [Tabata workouts](https://en.wikipedia.org/wiki/High-intensity_interval_training#Tabata_regimen), a form of high-intensity interval training. It's designed with simplicity and ease of use in mind, making it perfect for quick home workouts.
 
-## Sneak Peek of the App:
+As a developer, this project was an opportunity to delve into Android app development, explore new technologies, and create something meaningful for my family. It also serves as a showcase of my skills and approach to software development.
 
+## Sneak Peek of the App
 <img src="misc/screen_capture.png" alt="Marshall's Metronome Interface" width="206" height="344">
 
-## App Features:
+## App Features
+- **Custom Timers**: Adjust the high-intensity and rest intervals to fit your workout routine.
+- **Configurable Sets**: Customize the number of rounds for varied workout intensity.
+- **Seamless Operation**: Easy-to-use 'Start', 'Pause', and 'Resume' functionality.
+- **Quick Reset**: Reset your workout parameters quickly and start fresh.
 
-- **Custom Timers**: Set and modify the Tabata intervals to your liking, with the ability to adjust the high-intensity and rest durations.
-- **Configurable Sets**: Personalize the number of rounds to suit your workout intensity needs.
-- **Seamless Operation**: Commence workouts with the 'Start' button, which transforms into 'Pause' and 'Resume' during the exercise for effortless session management.
-- **Quick Reset**: Conveniently stop the ongoing workout and revisit the setup screen to adjust your workout parameters.
+## License
+The source code of "Marshall's Metronome" is available for personal use. Third-party sound effects used in the app are licensed under their respective terms, detailed in the [LICENSES.txt](./LICENSES.txt) file.
+
+## Development Tools
+Developed using Android Studio, with assistance from tools like GitHub Copilot for code suggestions and ChatGPT for programming guidance, this project reflects my approach to tackling software development challenges.
+
+Thank you for taking the time to look at "Marshall's Metronome." For more information about my work and other projects, visit my [GitHub Profile](https://github.com/wizzardx/).
+
+For questions, feedback, or bug reports related to this app, please feel free to open an issue in the [GitHub repository](https://github.com/wizzardx/MarshallsMetronome/issues).

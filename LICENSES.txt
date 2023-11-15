@@ -1,15 +1,27 @@
 Sound effect licenses:
 
-    - buzzer.mp3 - Created by hypocore. Creative Commons 0 - Downloaded from here, and edited further:
-        - https://freesound.org/people/hypocore/sounds/164090/
+- buzzer.mp3
+  - Creator: hypocore
+  - License: Creative Commons 0
+  - Source: https://freesound.org/people/hypocore/sounds/164090/
+  - Note: Edited further for use in this project.
 
-    - factory_whistle.mp3 - Created by unreadpages. Attribution 4.0. Downloaded from here, and edited further:
-        - https://freesound.org/people/unreadpages/sounds/494938/
+- factory_whistle.mp3
+  - Creator: unreadpages
+  - License: Attribution 4.0 (CC BY 4.0)
+  - License Link: https://creativecommons.org/licenses/by/4.0/
+  - Source: https://freesound.org/people/unreadpages/sounds/494938/
+  - Note: Edited further for use in this project.
 
-    - gong.mp3 - Created by Omachronic. CC BY 4.0. Downloaded from here, and edited further:
-        - https://freesound.org/people/Omachronic/packs/8156/
+- gong.mp3
+  - Creator: Omachronic
+  - License: Creative Commons BY 4.0 (CC BY 4.0)
+  - License Link: https://creativecommons.org/licenses/by/4.0/
+  - Source: https://freesound.org/people/Omachronic/packs/8156/
+  - Note: Edited further for use in this project.
 
-    - referree_whistle.mp3 - Created by SpliceSound. Creative Commons 0. Downloaded from here, and edited further:
-        - https://freesound.org/people/SpliceSound/sounds/218318/
-
-
+- referree_whistle.mp3
+  - Creator: SpliceSound
+  - License: Creative Commons 0
+  - Source: https://freesound.org/people/SpliceSound/sounds/218318/
+  - Note: Edited further for use in this project.
