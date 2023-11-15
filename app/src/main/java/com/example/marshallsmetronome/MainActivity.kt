@@ -227,6 +227,13 @@ class RunningState(
         // Keep track of whether the buzzer noise has been triggered for the end of the current cycle:
         var endOfCycleBuzzerTriggered = false
 
+        // Flags for tracking if sounds have been played for the current cycle
+        var refereeWhistlePlayed = false
+        var factoryWhistlePlayed = false
+
+        // We play a noise a "gong" noise at the start of the workout:
+        playSound(R.raw.gong)
+
         while (true) {
             // Do nothing while paused.
             while (_isPaused.value) {
@@ -244,32 +251,57 @@ class RunningState(
             _millisecondsRemainingInAllCycles.value =
                 (_millisecondsRemainingInAllCycles.value - Constants.SmallDelay).coerceAtLeast(0)
 
-            // Set flags based on the current timings.
+            // Do some logic just before the end of every interval:
+
+            // If we're near to, but haven't quite reached the end of any interval:
+            if (_millisecondsRemainingInCurrentInterval.value < Constants.MillisecondsPerSecond &&
+                _millisecondsRemainingInCurrentInterval.value > 0
+            ) {
+                // Are we currently in a work cycle?
+                if (_currentIntervalType.value == IntervalType.Work) {
+                    // If so, play a 'factory_whistle' sound to indicate the end of the work interval (if
+                    // we haven't already played it):
+                    if (!factoryWhistlePlayed) {
+                        playSound(R.raw.factory_whistle)
+                        factoryWhistlePlayed = true
+                    }
+                } else {
+                    // Otherwise, we're currently in a rest cycle.
+
+                    // Is this the last cycle of the workout?
+                    if (_currentCycleNum.value == cycles) {
+                        // If so, play a 'referee_whistle' sound to indicate the end of the entire workout
+                        // (if we haven't already played it):
+                        if (!refereeWhistlePlayed) {
+                            playSound(R.raw.referee_whistle)
+                            refereeWhistlePlayed = true
+                        }
+                    } else {
+                        // Otherwise, play a 'buzzer' sound to indicate the end of the rest interval
+                        // (if we haven't already played it):
+                        if (!endOfCycleBuzzerTriggered) {
+                            playSound(R.raw.buzzer)
+                            endOfCycleBuzzerTriggered = true
+                        }
+                    }
+                }
+            }
+
+            // Set some flags if we've just reached the very end of an interval:
 
             // Set a flag if we've just reached the end of the current interval.
             currentIntervalJustEnded = _millisecondsRemainingInCurrentInterval.value <= 0
 
             // Set a flag if we've just reached the end of the current cycle.
             currentCycleJustEnded = currentIntervalJustEnded &&
-                _currentIntervalType.value == Constants.LastIntervalTypeInCycle
+                    _currentIntervalType.value == Constants.LastIntervalTypeInCycle
 
             // Set a flag if we've just reached the end of the entire workout.
             workoutJustEnded = _millisecondsRemainingInAllCycles.value == 0
 
-            // If we're in the last interval in a cycle, and the time remaining in the interval is
-            // less than 1000 milliseconds, and we haven't triggered the beep yet, then trigger
-            // the beep now:
-            if (_currentIntervalType.value == Constants.LastIntervalTypeInCycle &&
-                _millisecondsRemainingInCurrentInterval.value < Constants.MillisecondsPerSecond &&
-                !endOfCycleBuzzerTriggered
-            ) {
-                playSound(R.raw.buzzer)
-                endOfCycleBuzzerTriggered = true
-            }
-
             // If the current interval just ended and we aren't at the end of the workout:
             if (currentIntervalJustEnded && !workoutJustEnded) {
-                //  Switch to the next interval type
+                // Switch to the next interval type
                 _currentIntervalType.value = when (_currentIntervalType.value) {
                     IntervalType.Work -> IntervalType.Rest
                     IntervalType.Rest -> IntervalType.Work
@@ -286,9 +318,10 @@ class RunningState(
                 // total number of cycles:
                 _currentCycleNum.value = (_currentCycleNum.value + 1).coerceAtMost(cycles)
 
-                // Now reset the flag that indicated that a beep has played for the end of the
-                // cycle
+                // Reset flags indicating whether sounds have already played in the current cycle:
                 endOfCycleBuzzerTriggered = false
+                factoryWhistlePlayed = false
+                refereeWhistlePlayed = false
             }
 
             // If the entire workout just ended then:
