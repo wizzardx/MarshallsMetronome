@@ -2,6 +2,7 @@ package com.example.marshallsmetronome
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import java.util.Locale
@@ -142,4 +143,66 @@ fun getErrorInfoFor(error: String?): Pair<(@Composable (() -> Unit))?, Boolean> 
             true
         )
     }
+}
+
+/**
+ * Reports an exception using the centralized ErrorHandler.
+ *
+ * This function is a convenience wrapper around ErrorHandler.handleError. It allows
+ * other parts of the application to report exceptions without directly interacting
+ * with ErrorHandler.
+ *
+ * @param errorMessage The mutable state for updating the UI with the error message.
+ * @param exception The exception to be reported.
+ */
+fun reportError(errorMessage: MutableState<String?>, exception: Exception) {
+    ErrorHandler.handleError(errorMessage, exception)
+}
+
+/**
+ * Determines if the current state represents the end of a cycle.
+ *
+ * This function checks if the current interval type is the last interval in a cycle,
+ * which is typically the rest interval. It's used to identify when to transition from
+ * one cycle to the next in the workout program.
+ *
+ * @param state The current TimerState instance containing information about the timer.
+ * @return True if the current interval type is the last interval in a cycle, False otherwise.
+ */
+fun isCycleEnd(state: TimerState) = state.currentIntervalType == Constants.LastIntervalTypeInCycle
+
+/**
+ * Determines the type of the next interval in the workout cycle.
+ *
+ * This function alternates the interval type between work and rest. If the current interval
+ * type is work, it will return rest for the next interval, and vice versa. This alternation
+ * helps in managing the transition between work and rest intervals in each cycle of the workout.
+ *
+ * @param currentType The type of the current interval, either work or rest.
+ * @return The interval type for the next interval.
+ */
+fun getNextIntervalType(currentType: IntervalType) =
+    // Logic to switch interval type
+    if (currentType == IntervalType.Work) IntervalType.Rest else IntervalType.Work
+
+/**
+ * Calculates the duration in milliseconds for the next interval.
+ *
+ * Based on the type of the next interval (work or rest), this function returns the
+ * appropriate duration in milliseconds. It uses the predefined work and rest intervals
+ * per cycle to calculate this duration. This is essential for timing each interval accurately
+ * within the workout cycle.
+ *
+ * @param nextIntervalType The type of the next interval, either work or rest.
+ * @param workSecondsPerCycle The duration of the work interval per cycle, in seconds.
+ * @param restSecondsPerCycle The duration of the rest interval per cycle, in seconds.
+ * @return The duration of the next interval in milliseconds.
+ */
+fun getNextIntervalMilliseconds(
+    nextIntervalType: IntervalType,
+    workSecondsPerCycle: Int,
+    restSecondsPerCycle: Int
+) = when (nextIntervalType) {
+    IntervalType.Work -> workSecondsPerCycle * Constants.MillisecondsPerSecond
+    IntervalType.Rest -> restSecondsPerCycle * Constants.MillisecondsPerSecond
 }

@@ -22,8 +22,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -31,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,7 +47,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 /**
  * The main activity for our app. The android runtime calls this logic.
@@ -52,22 +61,34 @@ class MainActivity : ComponentActivity() {
     private var mediaPlayer: MediaPlayer? = null
     private var errorMessage = mutableStateOf<String?>(null)
 
+    private var viewModel = MarshallsMetronomeViewModel(::playSound)
+
     private fun playSound(soundResourceId: Int) {
-        mediaPlayer?.let {
-            if (it.isPlaying) {
-                it.stop()
+        try {
+            mediaPlayer?.let {
+                if (it.isPlaying) {
+                    it.stop()
+                }
+                it.reset()
+
+                val context: Context = this@MainActivity
+                val uri = Uri.parse("android.resource://${context.packageName}/$soundResourceId")
+                it.setDataSource(context, uri)
+
+                it.prepare()
+                it.start()
+            } ?: run {
+                // MediaPlayer is null. Handle the case here.
+                errorMessage.value = "MediaPlayer is not initialized."
             }
-            it.reset()
-
-            val context: Context = this@MainActivity
-            val uri = Uri.parse("android.resource://${context.packageName}/$soundResourceId")
-            it.setDataSource(context, uri)
-
-            it.prepare()
-            it.start()
-        } ?: run {
-            // MediaPlayer is null. Handle the case here.
-            errorMessage.value = "MediaPlayer is not initialized."
+        } catch (ioe: IOException) {
+            reportError(errorMessage, ioe)
+        } catch (ise: IllegalStateException) {
+            reportError(errorMessage, ise)
+        } catch (iae: IllegalArgumentException) {
+            reportError(errorMessage, iae)
+        } catch (se: SecurityException) {
+            reportError(errorMessage, se)
         }
     }
 
@@ -78,15 +99,9 @@ class MainActivity : ComponentActivity() {
 
         try {
             mediaPlayer = MediaPlayer()
-            if (mediaPlayer == null) {
-                // MediaPlayer creation failed.
-                errorMessage.value = "Error creating MediaPlayer instance."
-            }
         } catch (e: Exception) {
-            errorMessage.value = "Exception in MediaPlayer initialization: ${e.message}"
-            Log.e("MainActivity", "Exception in MediaPlayer initialization", e)
+            reportError(errorMessage, e)
         }
-
         setContent {
             MarshallsMetronomeTheme {
                 // A surface container using the 'background' color from the theme
@@ -95,7 +110,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MarshallsMetronome(
-                        viewModel = MarshallsMetronomeViewModel(::playSound),
+                        viewModel = viewModel,
                         errorMessage = errorMessage,
                     )
                 }
@@ -109,7 +124,38 @@ class MainActivity : ComponentActivity() {
         }
         mediaPlayer?.release()
         mediaPlayer = null
+        viewModel.clearResources()
         super.onDestroy()
+    }
+}
+
+/**
+ * Singleton object for centralized error handling across the application.
+ *
+ * `ErrorHandler` provides utility functions to handle exceptions in a unified manner.
+ * It can log errors, update UI state based on error messages, and perform other
+ * application-wide error handling tasks. By centralizing error handling logic,
+ * `ErrorHandler` facilitates consistent and maintainable error management.
+ *
+ * Usage:
+ * ErrorHandler.handleError(errorMessageState, exception, "CustomTag")
+ */
+object ErrorHandler {
+    /**
+     * Handles exceptions by logging the error and updating the UI error message state.
+     *
+     * This method should be used to handle exceptions that occur within the application.
+     * It logs the error message and stack trace to the console and updates the provided
+     * mutable state with the error message for UI display.
+     *
+     * @param errorMessage The mutable state that holds the error message for UI updates.
+     * @param exception The exception that occurred.
+     * @param tag Optional logging tag, used for categorizing the log messages.
+     */
+    fun handleError(errorMessage: MutableState<String?>, exception: Exception, tag: String = "AppError") {
+        errorMessage.value = exception.message
+        Log.e(tag, "Error occurred: ", exception)
+        // Additional error handling logic here
     }
 }
 
@@ -157,6 +203,114 @@ object Constants {
 }
 
 /**
+ * Manages sound playback for various events in the application.
+ *
+ * This class encapsulates all sound-related operations, providing methods to play specific sounds
+ * for different scenarios like the start of a workout, the end of a work interval, the end of a rest
+ * interval, and the end of the entire workout cycle. It also maintains state to ensure sounds are not
+ * repeatedly played when not necessary.
+ *
+ * @param playSound A function that takes a sound resource ID and plays the corresponding sound.
+ *                  This allows for flexible integration with any sound playing mechanism.
+ */
+class SoundManager(private val playSound: (soundResourceId: Int) -> Unit) {
+
+    private var refereeWhistlePlayed = false
+    private var factoryWhistlePlayed = false
+    private var endOfCycleBuzzerTriggered = false
+
+    /**
+     * Plays the start sound of the workout.
+     *
+     * This function triggers the playback of the initial sound that signifies the beginning
+     * of the workout, typically a gong sound. It is intended to be called once at the start
+     * of the workout session.
+     */
+    fun playStartSound() {
+        playSound(R.raw.gong)
+    }
+
+    /**
+     * Plays the sound indicating the end of a work interval.
+     *
+     * This function should be called at the conclusion of a work interval. It checks if the
+     * factory whistle sound has already been played to avoid repetition. If not, it plays
+     * the sound and sets the flag indicating that the sound has been played.
+     */
+    fun playWorkEndSound() {
+        if (!factoryWhistlePlayed) {
+            playSound(R.raw.factory_whistle)
+            factoryWhistlePlayed = true
+        }
+    }
+
+    /**
+     * Plays the sound indicating the end of a rest interval or the entire workout.
+     *
+     * This function should be called at the conclusion of a rest interval. If it is the last
+     * cycle of the workout, it plays a referee whistle sound to indicate the end of the workout.
+     * Otherwise, it plays a buzzer sound to signify the end of the rest interval. It ensures
+     * each sound is played only once per cycle.
+     *
+     * @param cycles The total number of cycles in the workout program.
+     * @param currentCycle The current cycle number of the workout.
+     */
+    fun playRestEndSound(cycles: Int, currentCycle: Int) {
+        if (currentCycle == cycles) {
+            // At the end of the workout, play the referee whistle sound
+            if (!refereeWhistlePlayed) {
+                playSound(R.raw.referee_whistle)
+                refereeWhistlePlayed = true
+            }
+        } else if (!endOfCycleBuzzerTriggered) {
+            // At the end of all rest intervals (except the last one), play the buzzer sound
+            playSound(R.raw.buzzer)
+            endOfCycleBuzzerTriggered = true
+        }
+    }
+
+    /**
+     * Resets the flags indicating whether end-of-cycle sounds have been played.
+     *
+     * This function resets the internal flags that track whether specific sounds have been
+     * played for the current cycle. It is intended to be called at the end of each cycle to
+     * prepare for the next cycle's sound triggers.
+     */
+    fun resetEndOfCycleSounds() {
+        factoryWhistlePlayed = false
+        refereeWhistlePlayed = false
+        endOfCycleBuzzerTriggered = false
+    }
+}
+
+/**
+ * Represents the state of a timer in the application.
+ *
+ * This class encapsulates all necessary information regarding the current state of the timer,
+ * including the time remaining in the current interval and overall workout, the current interval type (work/rest),
+ * and the number of cycles in the workout. It also holds information about the duration of work and rest intervals.
+ *
+ * @property millisecondsRemainingInAllCycles The total milliseconds remaining for all cycles in the workout.
+ * @property isPaused A flag indicating whether the timer is currently paused.
+ * @property currentIntervalType The type of the current interval, either work or rest.
+ * @property currentCycleNum The current cycle number in the workout session.
+ * @property millisecondsRemainingInCurrentInterval The milliseconds remaining in the current interval.
+ * @property totalCycles The total number of cycles set for the workout session.
+ * @property workSecondsPerCycle The number of seconds of work per cycle.
+ * @property restSecondsPerCycle The number of seconds of rest per cycle.
+ */
+data class TimerState(
+    val millisecondsRemainingInAllCycles: Int,
+    val isPaused: Boolean,
+    val currentIntervalType: IntervalType,
+    val currentCycleNum: Int,
+    val millisecondsRemainingInCurrentInterval: Int,
+    val totalCycles: Int,
+    val workSecondsPerCycle: Int,
+    val restSecondsPerCycle: Int,
+)
+
+/**
  * Keeps track of the timer-related state for our app.
  */
 class RunningState(
@@ -186,176 +340,157 @@ class RunningState(
      */
     val playSound: (soundResourceId: Int) -> Unit,
 ) {
-    private var _millisecondsRemainingInAllCycles = mutableStateOf(
-        getSecondsForAllCycles(
-            cycles = cycles,
-            workSecondsPerCycle = workSecondsPerCycle,
-            restSecondsPerCycle = restSecondsPerCycle
-        ) * Constants.MillisecondsPerSecond
-    )
 
-    private var _isPaused = mutableStateOf(false)
+    private val _timerState = MutableStateFlow(
+        TimerState(
+            millisecondsRemainingInAllCycles =
+            getSecondsForAllCycles(
+                cycles = cycles,
+                workSecondsPerCycle = workSecondsPerCycle,
+                restSecondsPerCycle = restSecondsPerCycle
+            ) * Constants.MillisecondsPerSecond,
 
-    private var _currentIntervalType =
-        mutableStateOf(Constants.FirstIntervalTypeInCycle)
+            isPaused = false,
 
-    /**
-     * The current interval type, eg, "Work" or "Rest".
-     */
-    val currentIntervalType: State<IntervalType> = _currentIntervalType
+            currentIntervalType = Constants.FirstIntervalTypeInCycle,
 
-    private var _currentCycleNum = mutableStateOf(1)
+            currentCycleNum = 1,
 
-    /**
-     * The current cycle number, eg, 1, 2, 3, etc. Starts at 1, usually goes up to 8.
-     */
-    val currentCycleNum: State<Int> = _currentCycleNum
-
-    private var _millisecondsRemainingInCurrentInterval: MutableState<Int> =
-        mutableStateOf(
+            millisecondsRemainingInCurrentInterval =
             getSecondsForFirstInterval(
                 workSecondsPerCycle = workSecondsPerCycle
-            ) * Constants.MillisecondsPerSecond
+            ) * Constants.MillisecondsPerSecond,
+
+            totalCycles = cycles,
+
+            workSecondsPerCycle = workSecondsPerCycle,
+
+            restSecondsPerCycle = restSecondsPerCycle,
         )
+    )
+
+    /**
+     * A StateFlow object holding the current state of the timer.
+     *
+     * This property encapsulates the entire state of the timer at any given point in time,
+     * including the remaining time for the current interval and the entire workout,
+     * the current interval type (work or rest), the number of cycles, and other relevant timer settings.
+     * As a StateFlow, it offers a way to observe and react to changes in the timer's state.
+     *
+     * @property timerState The StateFlow<TimerState> object that can be observed for state changes.
+     *                      Accessing timerState.value provides the current TimerState instance
+     *                      representing the current state of the timer.
+     */
+    val timerState: StateFlow<TimerState> = _timerState.asStateFlow()
+
+    // Sound-management logic moved to a separate class:
+    private val soundManager = SoundManager(playSound)
 
     private var countdownJob: Job = coroutineScope.launch {
-        // Flags that we use to track if state just changed:
-        var currentIntervalJustEnded: Boolean
-        var currentCycleJustEnded: Boolean
-        var workoutJustEnded: Boolean
-
-        // Keep track of whether the buzzer noise has been triggered for the end of the current cycle:
-        var endOfCycleBuzzerTriggered = false
-
-        // Flags for tracking if sounds have been played for the current cycle
-        var refereeWhistlePlayed = false
-        var factoryWhistlePlayed = false
-
         // We play a noise a "gong" noise at the start of the workout:
-        playSound(R.raw.gong)
+        soundManager.playStartSound()
 
-        while (true) {
-            // Do nothing while paused.
-            while (_isPaused.value) {
+        while (isActive) {
+            val currentState = _timerState.value
+
+            if (currentState.isPaused) {
+                // Do nothing while paused. A small delay to avoid busy waiting.
                 delay(Constants.SmallDelay.toLong())
-            }
+            } else {
+                // Not paused, so delay a bit, then continue our logic for this loop iteration.
+                delay(Constants.SmallDelay.toLong()) // Delay for the specified interval
 
-            // Not paused, so delay a bit, then continue our logic for this loop iteration.
-            delay(Constants.SmallDelay.toLong())
+                // Perform timing logic
+                val newState = currentState.copy(
+                    millisecondsRemainingInAllCycles =
+                    currentState.millisecondsRemainingInAllCycles - Constants.SmallDelay,
 
-            // decrease remaining milliseconds in current interval by 100, but don't go past 0:
-            _millisecondsRemainingInCurrentInterval.value =
-                (_millisecondsRemainingInCurrentInterval.value - Constants.SmallDelay).coerceAtLeast(0)
+                    millisecondsRemainingInCurrentInterval =
+                    currentState.millisecondsRemainingInCurrentInterval - Constants.SmallDelay
+                )
 
-            // Do the same with remaining milliseconds in all the cycles:
-            _millisecondsRemainingInAllCycles.value =
-                (_millisecondsRemainingInAllCycles.value - Constants.SmallDelay).coerceAtLeast(0)
+                // This function will encapsulate the logic for changing states
+                val updatedState = handleStateTransitions(newState)
 
-            // Do some logic just before the end of every interval:
+                _timerState.value = updatedState // Update the state
 
-            // If we're near to, but haven't quite reached the end of any interval:
-            if (_millisecondsRemainingInCurrentInterval.value < Constants.MillisecondsPerSecond &&
-                _millisecondsRemainingInCurrentInterval.value > 0
-            ) {
-                // Are we currently in a work cycle?
-                if (_currentIntervalType.value == IntervalType.Work) {
-                    // If so, play a 'factory_whistle' sound to indicate the end of the work interval (if
-                    // we haven't already played it):
-                    if (!factoryWhistlePlayed) {
-                        playSound(R.raw.factory_whistle)
-                        factoryWhistlePlayed = true
-                    }
-                } else {
-                    // Otherwise, we're currently in a rest cycle.
-
-                    // Is this the last cycle of the workout?
-                    if (_currentCycleNum.value == cycles) {
-                        // If so, play a 'referee_whistle' sound to indicate the end of the entire workout
-                        // (if we haven't already played it):
-                        if (!refereeWhistlePlayed) {
-                            playSound(R.raw.referee_whistle)
-                            refereeWhistlePlayed = true
-                        }
-                    } else {
-                        // Otherwise, play a 'buzzer' sound to indicate the end of the rest interval
-                        // (if we haven't already played it):
-                        if (!endOfCycleBuzzerTriggered) {
-                            playSound(R.raw.buzzer)
-                            endOfCycleBuzzerTriggered = true
-                        }
-                    }
+                // Check if the workout has ended
+                if (updatedState.millisecondsRemainingInAllCycles <= 0) {
+                    // Workout just ended, break the loop
+                    break
                 }
-            }
-
-            // Set some flags if we've just reached the very end of an interval:
-
-            // Set a flag if we've just reached the end of the current interval.
-            currentIntervalJustEnded = _millisecondsRemainingInCurrentInterval.value <= 0
-
-            // Set a flag if we've just reached the end of the current cycle.
-            currentCycleJustEnded = currentIntervalJustEnded &&
-                    _currentIntervalType.value == Constants.LastIntervalTypeInCycle
-
-            // Set a flag if we've just reached the end of the entire workout.
-            workoutJustEnded = _millisecondsRemainingInAllCycles.value == 0
-
-            // If the current interval just ended and we aren't at the end of the workout:
-            if (currentIntervalJustEnded && !workoutJustEnded) {
-                // Switch to the next interval type
-                _currentIntervalType.value = when (_currentIntervalType.value) {
-                    IntervalType.Work -> IntervalType.Rest
-                    IntervalType.Rest -> IntervalType.Work
-                }
-
-                // Reset time remaining in the interval, based on the new interval type:
-                _millisecondsRemainingInCurrentInterval.value =
-                    getSecsCurrentInterval() * Constants.MillisecondsPerSecond
-            }
-
-            // If the current cycle just ended then:
-            if (currentCycleJustEnded) {
-                // Update the current cycle number, so long as it doesn't go past the
-                // total number of cycles:
-                _currentCycleNum.value = (_currentCycleNum.value + 1).coerceAtMost(cycles)
-
-                // Reset flags indicating whether sounds have already played in the current cycle:
-                endOfCycleBuzzerTriggered = false
-                factoryWhistlePlayed = false
-                refereeWhistlePlayed = false
-            }
-
-            // If the entire workout just ended then:
-            if (workoutJustEnded) {
-                // Stop this loop, we're done with all our logic.
-                break
             }
         }
+    }
+
+    private fun handleStateTransitions(state: TimerState): TimerState {
+        // Do some logic just before the end of every interval:
+        playIntervalEndSounds(state)
+
+        // Set some flags if we've just reached the very end of an interval:
+        val currentIntervalJustEnded = state.millisecondsRemainingInCurrentInterval <= 0
+        val workoutJustEnded = state.millisecondsRemainingInAllCycles <= 0
+
+        var updatedState = state
+
+        if (!workoutJustEnded && currentIntervalJustEnded) {
+            updatedState = handleIntervalEnd(state)
+        }
+
+        return updatedState
+    }
+
+    private fun playIntervalEndSounds(state: TimerState) {
+        if (state.millisecondsRemainingInCurrentInterval < Constants.MillisecondsPerSecond) {
+            if (state.currentIntervalType == IntervalType.Work) {
+                soundManager.playWorkEndSound()
+            } else {
+                soundManager.playRestEndSound(state.totalCycles, state.currentCycleNum)
+            }
+        }
+    }
+
+    private fun transitionToNextCycleAndReset(state: TimerState): TimerState {
+        soundManager.resetEndOfCycleSounds()
+        val nextCycleNum = getNextCycleNumber(state)
+
+        return state.copy(currentCycleNum = nextCycleNum)
+    }
+
+    private fun getNextCycleNumber(state: TimerState) =
+        // Increment cycle number, ensuring it does not exceed total cycles
+        (state.currentCycleNum + 1).coerceAtMost(state.totalCycles)
+
+    private fun handleIntervalEnd(state: TimerState): TimerState {
+        val nextIntervalType = getNextIntervalType(state.currentIntervalType)
+        val nextIntervalMilliseconds = getNextIntervalMilliseconds(
+            nextIntervalType,
+            state.workSecondsPerCycle,
+            state.restSecondsPerCycle
+        )
+
+        var updatedState = state.copy(
+            currentIntervalType = nextIntervalType,
+            millisecondsRemainingInCurrentInterval = nextIntervalMilliseconds
+        )
+
+        if (isCycleEnd(state)) {
+            updatedState = transitionToNextCycleAndReset(updatedState)
+        }
+
+        return updatedState
     }
 
     /**
      * Return how many seconds remain for the entire workout program.
      */
-    fun getSecondsRemainingInAllCycles() = _millisecondsRemainingInAllCycles.value / Constants.MillisecondsPerSecond
-
-    /***
-     * Return how many seconds thera are total, for the current interval (type), eg, 20 seconds of work, or 10 seconds
-     * of rest.
-     */
-    fun getSecsCurrentInterval() = when (_currentIntervalType.value) {
-        IntervalType.Work -> workSecondsPerCycle
-        IntervalType.Rest -> restSecondsPerCycle
-    }
-
-    /**
-     * Return how many seconds remain in the current interval, eg, 20 seconds of work, or 10 seconds of rest.
-     */
-    fun getSecsLeftCurrInterval() =
-        _millisecondsRemainingInCurrentInterval.value / Constants.MillisecondsPerSecond
+    fun getSecondsRemainingInAllCycles() =
+        _timerState.value.millisecondsRemainingInAllCycles / Constants.MillisecondsPerSecond
 
     /**
      * Returns true if we are currently paused.
      */
-    fun isPaused(): Boolean = _isPaused.value
+    fun isPaused(): Boolean = _timerState.value.isPaused
 
     /**
      * Shuts down the coroutine and it's timer, etc. Should be called when we're done with this
@@ -369,14 +504,18 @@ class RunningState(
      * Pauses the timer.
      */
     fun pause() {
-        _isPaused.value = true
+        val currentState = _timerState.value
+        val updatedState = currentState.copy(isPaused = true)
+        _timerState.value = updatedState
     }
 
     /**
      * Resumes the timer.
      */
     fun resume() {
-        _isPaused.value = false
+        val currentState = _timerState.value
+        val updatedState = currentState.copy(isPaused = false)
+        _timerState.value = updatedState
     }
 }
 
@@ -387,7 +526,24 @@ class MarshallsMetronomeViewModel(
     private val playSound: (Int) -> Unit = {},
 ) {
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
-    private var runningState: MutableState<RunningState?> = mutableStateOf(null)
+
+    // Private mutable state
+    private var _runningState: MutableState<RunningState?> = mutableStateOf(null)
+
+    // Public read-only state
+    /**
+     * Represents the public read-only state of the running workout timer.
+     *
+     * This state includes all the essential information about the current state of the
+     * workout timer, such as whether it is paused, the current interval type, cycle number,
+     * and time remaining in both the current interval and the entire workout session.
+     * It's observed by the UI to update and display the timer information.
+     *
+     * @property runningState The StateFlow<TimerState> that can be observed for state changes.
+     *                        Accessing runningState.value provides the current TimerState instance
+     *                        representing the timer's current state.
+     */
+    val runningState: State<RunningState?> = _runningState
 
     /**
      * Input that we've received from the "Cycles" TextField.
@@ -467,29 +623,35 @@ class MarshallsMetronomeViewModel(
      * Return the time remaining in the current interval, in the format "Work: 20" or "Rest: 10".
      */
     fun formatCurrentIntervalTime(): String {
-        var timeString = "Work: ${secondsWorkInput.toIntOrNull() ?: 0}"
+        val currentState = runningState.value?.timerState?.value
+        var result = "Work: ${secondsWorkInput.toIntOrNull() ?: 0}" // Default value
 
-        runningState.value?.currentIntervalType?.value?.let { intervalType ->
-            runningState.value?.getSecsLeftCurrInterval()?.let { secondsRemainingInCurrentInterval ->
-
-                // As a workaround to avoid having seconds of new intervals show briefly (100 mss and then jump down),
-                // when our seconds is at the maximum value for the interval, then we bump it down here instead.
-                val totalSeconds = runningState.value?.getSecsCurrentInterval()
-                val secondsPart = if (secondsRemainingInCurrentInterval == totalSeconds) {
-                    secondsRemainingInCurrentInterval - 1
-                } else {
-                    secondsRemainingInCurrentInterval
-                }
-
-                val intervalTypeName = when (intervalType) {
-                    IntervalType.Work -> "Work"
-                    IntervalType.Rest -> "Rest"
-                }
-                timeString = "$intervalTypeName: $secondsPart"
+        currentState?.let { state ->
+            val intervalType = state.currentIntervalType
+            val totalSecondsForInterval = when (intervalType) {
+                IntervalType.Work -> state.workSecondsPerCycle
+                IntervalType.Rest -> state.restSecondsPerCycle
             }
+            val secondsRemainingInCurrentInterval =
+                state.millisecondsRemainingInCurrentInterval / Constants.MillisecondsPerSecond
+
+            // As a workaround to avoid having seconds of new intervals show briefly (100 mss and then jump down),
+            // when our seconds is at the maximum value for the interval, then we bump it down here instead.
+            val adjustedSecondsRemaining = if (secondsRemainingInCurrentInterval == totalSecondsForInterval) {
+                secondsRemainingInCurrentInterval - 1
+            } else {
+                secondsRemainingInCurrentInterval
+            }
+
+            val intervalTypeName = when (intervalType) {
+                IntervalType.Work -> "Work"
+                IntervalType.Rest -> "Rest"
+            }
+
+            result = "$intervalTypeName: $adjustedSecondsRemaining"
         }
 
-        return timeString
+        return result
     }
 
     /**
@@ -498,13 +660,8 @@ class MarshallsMetronomeViewModel(
      */
     fun formatCurrentCycleNumber(): String {
         val totalCycles = totalCyclesInput.toIntOrNull() ?: 0
-        var timeString = "1/$totalCycles"
-
-        runningState.value?.currentCycleNum?.value?.let { currentCycleNum ->
-            timeString = "$currentCycleNum/$totalCycles"
-        }
-
-        return timeString
+        val currentCycleNum = _runningState.value?.timerState?.value?.currentCycleNum ?: 1
+        return "$currentCycleNum/$totalCycles"
     }
 
     private fun playSound(soundResourceId: Int) {
@@ -535,7 +692,7 @@ class MarshallsMetronomeViewModel(
                 secondsRestInputError == null
             ) {
                 // Validations passed, so we can start up our running state.
-                runningState.value = RunningState(
+                _runningState.value = RunningState(
                     coroutineScope = coroutineScope,
                     cycles = totalCyclesInput.toInt(),
                     workSecondsPerCycle = secondsWorkInput.toInt(),
@@ -567,7 +724,7 @@ class MarshallsMetronomeViewModel(
      */
     fun clearResources() {
         runningState.value?.shutdown()
-        runningState.value = null
+        _runningState.value = null
     }
 
     /**
@@ -604,6 +761,13 @@ class MarshallsMetronomeViewModel(
  */
 @Composable
 fun TotalTimeRemainingView(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
+    // Collect the current state of the timer from the ViewModel's runningState and observe changes
+    val timerState = viewModel.runningState.value?.timerState?.collectAsState()
+
+    // Observe changes in the timerState and trigger recomposition when it changes
+    LaunchedEffect(timerState?.value) {
+        // This block is empty but it's enough to observe changes and trigger recompositions
+    }
     Text(
         text = viewModel.formatTotalTimeRemainingString(),
         fontSize = 50.sp,
@@ -619,13 +783,19 @@ fun TotalTimeRemainingView(viewModel: MarshallsMetronomeViewModel, modifier: Mod
 @Composable
 fun ControlButtons(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
     Row {
-        Button(onClick = { viewModel.onButtonClick() }) {
+        Button(
+            onClick = { viewModel.onButtonClick() },
+            modifier = Modifier.semantics { contentDescription = "Start workout timer" }
+        ) {
             Text(text = viewModel.buttonText, modifier = modifier)
         }
 
         Spacer(modifier = modifier.width(10.dp))
 
-        Button(onClick = { viewModel.onResetClick() }) {
+        Button(
+            onClick = { viewModel.onResetClick() },
+            modifier = Modifier.semantics { contentDescription = "Reset workout timer" }
+        ) {
             Text(text = "Reset", modifier = modifier)
         }
     }
@@ -636,6 +806,14 @@ fun ControlButtons(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
  */
 @Composable
 fun CurrentCycleNumberView(viewModel: MarshallsMetronomeViewModel, modifier: Modifier) {
+    // Collect the current state of the timer from the ViewModel's runningState and observe changes
+    val timerState = viewModel.runningState.value?.timerState?.collectAsState()
+
+    // Observe changes in the timerState and trigger recomposition when it changes
+    LaunchedEffect(timerState?.value) {
+        // This block is empty but it's enough to observe changes and trigger recompositions
+    }
+
     Text(
         text = viewModel.formatCurrentCycleNumber(),
         fontSize = 90.sp,
@@ -658,7 +836,7 @@ fun ConfigInputFields(viewModel: MarshallsMetronomeViewModel, modifier: Modifier
             onValueChange = { viewModel.totalCyclesInput = normaliseIntInput(it) },
             labelText = "Cycles",
             modifier = modifier,
-            enabled = viewModel.textInputControlsEnabled
+            enabled = viewModel.textInputControlsEnabled,
         )
     )
 
@@ -682,7 +860,7 @@ fun ConfigInputFields(viewModel: MarshallsMetronomeViewModel, modifier: Modifier
             onValueChange = { viewModel.secondsRestInput = normaliseIntInput(it) },
             labelText = "Rest",
             modifier = modifier,
-            enabled = viewModel.textInputControlsEnabled
+            enabled = viewModel.textInputControlsEnabled,
         )
     )
 }
@@ -696,6 +874,14 @@ fun MarshallsMetronome(
     errorMessage: State<String?> = mutableStateOf(null),
     viewModel: MarshallsMetronomeViewModel = MarshallsMetronomeViewModel(),
 ) {
+    // Collect the current state of the timer from the ViewModel's runningState and observe changes
+    val timerState = viewModel.runningState.value?.timerState?.collectAsState()
+
+    // Observe changes in the timerState and trigger recomposition when it changes
+    LaunchedEffect(timerState?.value) {
+        // This block is empty but it's enough to observe changes and trigger recompositions
+    }
+
     /**
      * Also make sure that we shut down the coroutine and it's timer, etc, at the end when we're
      *  done, if it was allocated at that point.
@@ -777,7 +963,7 @@ data class InputTextFieldParams(
     val onValueChange: (String) -> Unit,
     val labelText: String,
     val modifier: Modifier = Modifier,
-    val enabled: Boolean
+    val enabled: Boolean,
 )
 
 /***
