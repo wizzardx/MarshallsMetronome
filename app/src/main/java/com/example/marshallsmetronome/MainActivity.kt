@@ -28,6 +28,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +53,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 /**
@@ -175,10 +180,10 @@ enum class IntervalType {
  * interval, and the end of the entire workout cycle. It also maintains state to ensure sounds are not
  * repeatedly played when not necessary.
  *
- * @param playSound A function that takes a sound resource ID and plays the corresponding sound.
- *                  This allows for flexible integration with any sound playing mechanism.
+ * @property playSound A function that takes a sound resource ID and plays the corresponding sound.
+ *                     This allows for flexible integration with any sound playing mechanism.
  */
-class SoundManager(private val playSound: (soundResourceId: Int) -> Unit) {
+class SoundManager(val playSound: (soundResourceId: Int) -> Unit) {
 
     private var refereeWhistlePlayed = false
     private var factoryWhistlePlayed = false
@@ -351,46 +356,49 @@ class RunningState(
     // Sound-management logic moved to a separate class:
     private val soundManager = SoundManager(playSound)
 
+    private val mutex = Mutex()
+
     private var countdownJob: Job = coroutineScope.launch {
         // We play a noise a "gong" noise at the start of the workout:
         soundManager.playStartSound()
 
-        while (isActive) {
-            val currentState = _timerState.value
+        var stopLoop = false
 
-            if (currentState.isPaused) {
-                // Do nothing while paused. A small delay to avoid busy waiting.
-                delay(Constants.SmallDelay.toLong())
-            } else {
-                // Not paused, so delay a bit, then continue our logic for this loop iteration.
-                delay(Constants.SmallDelay.toLong()) // Delay for the specified interval
+        while (isActive && !stopLoop) {
+            withTimeout(Constants.SmallDelay.toLong()) {
+                mutex.withLock {
+                    val currentState = _timerState.value
+                    if (!currentState.isPaused) {
+                        // Perform timing logic
+                        val newState = currentState.copy(
+                            millisecondsRemainingInAllCycles =
+                            currentState.millisecondsRemainingInAllCycles - Constants.SmallDelay,
 
-                // Perform timing logic
-                val newState = currentState.copy(
-                    millisecondsRemainingInAllCycles =
-                    currentState.millisecondsRemainingInAllCycles - Constants.SmallDelay,
+                            millisecondsRemainingInCurrentInterval =
+                            currentState.millisecondsRemainingInCurrentInterval - Constants.SmallDelay
+                        )
 
-                    millisecondsRemainingInCurrentInterval =
-                    currentState.millisecondsRemainingInCurrentInterval - Constants.SmallDelay
-                )
+                        // This function will encapsulate the logic for changing states
+                        val updatedState = handleStateTransitions(newState)
 
-                // This function will encapsulate the logic for changing states
-                val updatedState = handleStateTransitions(newState)
+                        _timerState.value = updatedState // Update the state
 
-                _timerState.value = updatedState // Update the state
-
-                // Check if the workout has ended
-                if (updatedState.millisecondsRemainingInAllCycles <= 0) {
-                    // Workout just ended, break the loop
-                    break
+                        // Check if the workout has ended
+                        if (updatedState.millisecondsRemainingInAllCycles <= 0) {
+                            // Workout just ended, break the loop
+                            stopLoop = true
+                        }
+                    }
                 }
             }
+            // Sleep a bit at the end of each loop to avoid busy looping
+            delay(Constants.SmallDelay.toLong())
         }
     }
 
     private fun handleStateTransitions(state: TimerState): TimerState {
         // Do some logic just before the end of every interval:
-        playIntervalEndSounds(state)
+        playIntervalEndSounds(state, soundManager)
 
         // Set some flags if we've just reached the very end of an interval:
         val currentIntervalJustEnded = state.millisecondsRemainingInCurrentInterval <= 0
@@ -404,27 +412,6 @@ class RunningState(
 
         return updatedState
     }
-
-    private fun playIntervalEndSounds(state: TimerState) {
-        if (state.millisecondsRemainingInCurrentInterval < Constants.MillisecondsPerSecond) {
-            if (state.currentIntervalType == IntervalType.Work) {
-                soundManager.playWorkEndSound()
-            } else {
-                soundManager.playRestEndSound(state.totalCycles, state.currentCycleNum)
-            }
-        }
-    }
-
-    private fun transitionToNextCycleAndReset(state: TimerState): TimerState {
-        soundManager.resetEndOfCycleSounds()
-        val nextCycleNum = getNextCycleNumber(state)
-
-        return state.copy(currentCycleNum = nextCycleNum)
-    }
-
-    private fun getNextCycleNumber(state: TimerState) =
-        // Increment cycle number, ensuring it does not exceed total cycles
-        (state.currentCycleNum + 1).coerceAtMost(state.totalCycles)
 
     private fun handleIntervalEnd(state: TimerState): TimerState {
         val nextIntervalType = getNextIntervalType(state.currentIntervalType)
@@ -440,7 +427,7 @@ class RunningState(
         )
 
         if (isCycleEnd(state)) {
-            updatedState = transitionToNextCycleAndReset(updatedState)
+            updatedState = transitionToNextCycleAndReset(updatedState, soundManager)
         }
 
         return updatedState
@@ -469,18 +456,69 @@ class RunningState(
      * Pauses the timer.
      */
     fun pause() {
-        val currentState = _timerState.value
-        val updatedState = currentState.copy(isPaused = true)
-        _timerState.value = updatedState
+        runBlocking {
+            withTimeout(Constants.SmallDelay.toLong()) {
+                mutex.withLock {
+                    val currentState = _timerState.value
+                    val updatedState = currentState.copy(isPaused = true)
+                    _timerState.value = updatedState
+                }
+            }
+        }
     }
 
     /**
      * Resumes the timer.
      */
     fun resume() {
-        val currentState = _timerState.value
-        val updatedState = currentState.copy(isPaused = false)
-        _timerState.value = updatedState
+        runBlocking {
+            withTimeout(Constants.SmallDelay.toLong()) {
+                mutex.withLock {
+                    val currentState = _timerState.value
+                    val updatedState = currentState.copy(isPaused = false)
+                    _timerState.value = updatedState
+                }
+            }
+        }
+    }
+
+    /**
+     * Checks if the countdown job is currently active.
+     *
+     * This method is used primarily for testing purposes to verify the state of the coroutine job
+     * responsible for the countdown logic. It returns `true` if the job is active, meaning it is
+     * either in the process of executing or awaiting action, and `false` if the job is completed or cancelled.
+     *
+     * @return Boolean indicating whether the countdown job is active.
+     */
+    fun isJobActive() = countdownJob.isActive
+}
+
+/**
+ * Transitions to the next cycle of the workout and resets necessary state.
+ *
+ * This function is called at the end of each cycle to update the state for the next cycle. It resets
+ * end-of-cycle sounds and updates the cycle number. It ensures the timer and associated logic
+ * are correctly set up for the next cycle, maintaining the continuity of the workout session.
+ *
+ * @param state The current state of the timer.
+ * @param soundManager The SoundManager instance used to manage sound playback.
+ * @return The updated TimerState reflecting the transition to the next cycle.
+ */
+fun transitionToNextCycleAndReset(state: TimerState, soundManager: SoundManager): TimerState {
+    soundManager.resetEndOfCycleSounds()
+    val nextCycleNum = getNextCycleNumber(state)
+
+    return state.copy(currentCycleNum = nextCycleNum)
+}
+
+private fun playIntervalEndSounds(state: TimerState, soundManager: SoundManager) {
+    if (state.millisecondsRemainingInCurrentInterval < Constants.MillisecondsPerSecond) {
+        if (state.currentIntervalType == IntervalType.Work) {
+            soundManager.playWorkEndSound()
+        } else {
+            soundManager.playRestEndSound(state.totalCycles, state.currentCycleNum)
+        }
     }
 }
 
@@ -489,8 +527,8 @@ class RunningState(
  */
 class MarshallsMetronomeViewModel(
     private val playSound: (Int) -> Unit = {},
+    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Main),
 ) {
-    private val coroutineScope = CoroutineScope(Dispatchers.Main)
 
     // Private mutable state
     private var _runningState: MutableState<RunningState?> = mutableStateOf(null)
@@ -539,8 +577,6 @@ class MarshallsMetronomeViewModel(
      * Error message for the "Rest" TextField.
      */
     var secondsRestInputError by mutableStateOf<String?>(null)
-
-    private var _cachedAppVersion: String? = null
 
     /**
      * Return the text to display on the Start/Pause/Resume button.
@@ -693,31 +729,53 @@ class MarshallsMetronomeViewModel(
     }
 
     /**
-     * Return the version number of our app.
+     * Determines if the timer has been started.
+     *
+     * This function checks the state of the ViewModel to determine if the timer has been initialized
+     * and started. It returns `true` if the timer is currently running or paused (i.e., not null),
+     * indicating that the workout session has begun. If the timer has not been started yet, or if it
+     * has been reset and is currently null, the function returns `false`.
+     *
+     * @return Boolean indicating whether the timer has been started.
      */
-    // We specifically want to catch the NameNotFoundException exception here, and return
-    // "Unknown" if we can't get the version number. We don't care about the other details
-    // related to the exception. Also, we catch the NullPointerException so that we can
-    // show the Preview.
-    @Suppress("SwallowedException", "TooGenericExceptionCaught")
-    fun getAppVersion(context: Context): String {
-        // Return cached app version if we have it already:
-        if (_cachedAppVersion != null) {
-            return _cachedAppVersion!!
-        }
-        // Otherwise, cache and return the app version:
-        _cachedAppVersion = try {
-            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            // This part lets us use the Preview again:
-            try {
-                packageInfo.versionName
-            } catch (e: NullPointerException) {
-                "NULL_POINTER_EXCEPTION"
-            }
-        } catch (e: PackageManager.NameNotFoundException) {
-            "Unknown"
-        }
-        return _cachedAppVersion!!
+    fun timerStarted(): Boolean = runningState.value != null
+
+    /**
+     * Determines whether the timer is currently paused, returning a boolean value.
+     *
+     * This method primarily checks if the timer is in a paused state and returns `true` if so,
+     * and `false` if it is not paused (i.e., it is actively running). It is designed to be
+     * straightforward for typical use cases where the timer's state is known to be initialized.
+     *
+     * However, this method has a specific behavior for debugging purposes: if the timer has not
+     * been started or initialized yet, invoking this method will cause the system to crash. This
+     * behavior is intentional to aid in identifying issues during the development phase where the
+     * timer's state might be incorrectly assumed or managed.
+     *
+     * Usage:
+     * - Returns `true` if the timer is paused.
+     * - Returns `false` if the timer is not paused (running).
+     * - Crashes if the timer is not initialized, to highlight improper usage during debugging.
+     */
+    fun isTimerPausedOrFail(): Boolean = runningState.value!!.timerState.value.isPaused
+}
+
+/**
+ * Return the version number of our app.
+ */
+// We specifically want to catch the NameNotFoundException exception here, and return
+// "Unknown" if we can't get the version number. We don't care about the other details
+// related to the exception. Also, we catch the NullPointerException so that we can
+// show the Preview.-
+@Suppress("SwallowedException")
+fun getAppVersion(context: Context): String {
+    val unknown = "Unknown"
+    return try {
+        val packageManager = context.packageManager
+        val packageInfo = packageManager?.getPackageInfo(context.packageName, 0)
+        packageInfo?.versionName ?: unknown
+    } catch (e: PackageManager.NameNotFoundException) {
+        unknown
     }
 }
 
@@ -842,6 +900,10 @@ fun MarshallsMetronome(
     // Collect the current state of the timer from the ViewModel's runningState and observe changes
     val timerState = viewModel.runningState.value?.timerState?.collectAsState()
 
+    // Get and remember (don't keep recomputing) the app version number:
+    val context = LocalContext.current
+    val appVersion = remember { getAppVersion(context) }
+
     // Observe changes in the timerState and trigger recomposition when it changes
     LaunchedEffect(timerState?.value) {
         // This block is empty but it's enough to observe changes and trigger recompositions
@@ -900,7 +962,7 @@ fun MarshallsMetronome(
 
         // Version number of our app:
         Text(
-            text = "Version: ${viewModel.getAppVersion(LocalContext.current)}",
+            text = "Version: $appVersion",
             modifier = modifier,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -936,7 +998,9 @@ data class InputTextFieldParams(
  */
 @Composable
 fun InputTextField(params: InputTextFieldParams) {
-    val (supportingText, isError) = getErrorInfoFor(params.errorMessage)
+    val errorInfo = getErrorInfoFor(params.errorMessage)
+    val errorTextComposable = displayErrorInfo(errorInfo)
+
     TextField(
         value = params.value,
         onValueChange = params.onValueChange,
@@ -945,8 +1009,8 @@ fun InputTextField(params: InputTextFieldParams) {
         label = { Text(text = params.labelText) },
         modifier = params.modifier.padding(top = 20.dp),
         enabled = params.enabled,
-        supportingText = supportingText,
-        isError = isError,
+        isError = errorInfo.hasError,
+        supportingText = errorTextComposable,
     )
 }
 
