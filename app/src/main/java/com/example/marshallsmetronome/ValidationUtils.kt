@@ -29,33 +29,38 @@ fun validateIntInput(value: String): String? {
 }
 
 /**
- * Normalizes a string input to remove non-numeric characters and leading zeros.
+ * Normalizes a string input to ensure it contains only numeric digits.
  *
- * This function processes a string input, typically representing a number, and
- * removes any non-digit characters. It also removes leading zeros while
- * preserving the numerical value of the string. If the string does not contain
- * any digits, or only contains zeros, the result is "0". This function is
- * useful for sanitizing and standardizing numerical user inputs, ensuring they
- * are in a format suitable for further processing or conversion to an integer.
+ * This function checks the provided `input` string and returns it if it's either
+ * empty or contains only digit characters. If `input` contains any non-digit
+ * characters, the function returns the `orig` string, which represents the
+ * original or previous value.
  *
- * @param s The string input to be normalized.
- * @return A normalized string with non-numeric characters removed and leading zeros stripped.
+ * @param input The string to be normalized.
+ * @param orig The original string to revert to if `input` is invalid.
+ * @return A string that is either the normalized input or the original string.
  */
-fun normaliseIntInput(s: String): String {
-    // Go through the string, and remove any non-numeric characters.
-    // Don't allow 0 at the start of the number. But if there is no number at the
-    // end, then our result is 0
-    var result = ""
-    var foundNonZero = false
-    for (c in s) {
-        if (c.isDigit()) {
-            if (c != '0') {
-                foundNonZero = true
-            }
-            if (foundNonZero) {
-                result += c
-            }
-        }
+fun normaliseIntInput(
+    input: String,
+    orig: String,
+): String {
+    return if (input.isEmpty() || input.all { it.isDigit() }) {
+        input // Use newText if it's empty or all digits
+    } else {
+        orig // Retain the previous value of text if the input contains non-digit characters
     }
-    return result
+}
+
+/**
+ * Safely casts a Long value to an Int.
+ * Throws an ArithmeticException if the Long value is outside the range of Int.
+ *
+ * @return The Int value corresponding to this Long.
+ * @throws ArithmeticException if this value is not within the range of Int.
+ */
+fun Long.safeToInt(): Int {
+    if (this < Int.MIN_VALUE || this > Int.MAX_VALUE) {
+        throw ArithmeticException("Long value $this cannot be cast to Int without data loss.")
+    }
+    return this.toInt()
 }

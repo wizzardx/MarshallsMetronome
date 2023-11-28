@@ -9,7 +9,6 @@ import org.mockito.kotlin.verify
 
 @Suppress("FunctionMaxLength")
 class SoundManagerTest {
-
     private lateinit var soundManager: SoundManager
     private val mockPlaySound: (Int) -> Unit = mock()
 
@@ -33,14 +32,14 @@ class SoundManagerTest {
 
     @Test
     fun `playRestEndSound triggers buzzer sound when not last cycle`() {
-        soundManager.playRestEndSound(cycles = 3, currentCycle = 2)
+        soundManager.playRestEndSound(cycles = 3, currentCycleNum = 2)
         verify(mockPlaySound).invoke(R.raw.buzzer)
         verify(mockPlaySound, never()).invoke(R.raw.referee_whistle)
     }
 
     @Test
     fun `playRestEndSound triggers referee whistle sound on last cycle`() {
-        soundManager.playRestEndSound(cycles = 3, currentCycle = 3)
+        soundManager.playRestEndSound(cycles = 3, currentCycleNum = 3)
         verify(mockPlaySound).invoke(R.raw.referee_whistle)
         verify(mockPlaySound, never()).invoke(R.raw.buzzer)
     }
@@ -49,14 +48,14 @@ class SoundManagerTest {
     fun `resetEndOfCycleSounds resets sound played flags`() {
         // Trigger sounds first
         soundManager.playWorkEndSound()
-        soundManager.playRestEndSound(cycles = 3, currentCycle = 2)
+        soundManager.playRestEndSound(cycles = 3, currentCycleNum = 2)
 
         // Reset the flags
         soundManager.resetEndOfCycleSounds()
 
         // The sounds should play again after resetting
         soundManager.playWorkEndSound()
-        soundManager.playRestEndSound(cycles = 3, currentCycle = 2)
+        soundManager.playRestEndSound(cycles = 3, currentCycleNum = 2)
         verify(mockPlaySound, times(2)).invoke(R.raw.factory_whistle)
         verify(mockPlaySound, times(2)).invoke(R.raw.buzzer)
     }

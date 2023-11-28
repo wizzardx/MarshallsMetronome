@@ -20,7 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
  * @param errorMessage The mutable state for updating the UI with the error message.
  * @param exception The exception to be reported.
  */
-fun reportError(errorMessage: MutableState<String?>, exception: Exception) {
+fun reportError(
+    errorMessage: MutableState<String?>?,
+    exception: Throwable,
+) {
     ErrorHandler.handleError(errorMessage, exception)
 }
 

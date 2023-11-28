@@ -12,7 +12,6 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 @Suppress("FunctionMaxLength")
 class ErrorHandlingUtilsKtInstrumentedTest {
-
     @get:Rule
     val rule = createComposeRule()
 

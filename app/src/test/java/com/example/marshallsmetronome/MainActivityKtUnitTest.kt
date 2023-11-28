@@ -12,7 +12,6 @@ import org.mockito.Mockito.`when`
 
 @Suppress("FunctionMaxLength")
 class MainActivityKtUnitTest {
-
     // Tests for getAppVersion
     @Test
     fun `getAppVersion returns correct version`() {

@@ -11,7 +11,6 @@ import org.junit.Rule
 import org.junit.Test
 
 class MainActivityKtInstrumentedTest {
-
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
@@ -39,9 +38,9 @@ class MainActivityKtInstrumentedTest {
         composeTestRule.onNodeWithText("Rest").performTextInput("bb10a")
 
         // Check that  text input boxes with expected values exist.
-        composeTestRule.onNodeWithText("108").assertIsDisplayed() // Cycles
-        composeTestRule.onNodeWithText("2020").assertIsDisplayed() // Work
-        composeTestRule.onNodeWithText("1010").assertIsDisplayed() // Rest
+        composeTestRule.onNodeWithText("8").assertIsDisplayed() // Cycles
+        composeTestRule.onNodeWithText("20").assertIsDisplayed() // Work
+        composeTestRule.onNodeWithText("10").assertIsDisplayed() // Rest
     }
 
     @Test
@@ -56,9 +55,15 @@ class MainActivityKtInstrumentedTest {
         composeTestRule.onNodeWithText("Pause").performClick()
         composeTestRule.onNodeWithText("Work").assertIsNotEnabled()
 
+        // Resume and check state
+        composeTestRule.onNodeWithText("Resume").performClick()
+        composeTestRule.onNodeWithText("Pause").assertIsDisplayed()
+
         // Reset and check state
         composeTestRule.onNodeWithText("Reset").performClick()
         composeTestRule.onNodeWithText("Work").assertIsEnabled()
+
+        // Add more tests here as needed...
     }
 
     @Test
@@ -68,7 +73,7 @@ class MainActivityKtInstrumentedTest {
         composeTestRule.onNodeWithText("Start").performClick()
         composeTestRule.waitForIdle()
 
-        // The error message "Must be at most 100" is diplayed in the Text Field's suportingText child control
+        // The error message "Must be at most 100" is displayed in the Text Field's supporting Text child control
         // which is hard for us to check directly.
     }
 }

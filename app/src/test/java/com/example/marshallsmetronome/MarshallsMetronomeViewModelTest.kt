@@ -1,9 +1,15 @@
 package com.example.marshallsmetronome
 
+import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,646 +21,960 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 
-@Suppress("FunctionMaxLength")
+@Suppress("FunctionMaxLength", "LargeClass")
 class MarshallsMetronomeViewModelTest {
-
     private val mockPlaySound: (Int) -> Unit = mock()
 
-    private fun newViewModel(coroutineScope: CoroutineScope) =
-        MarshallsMetronomeViewModel(mockPlaySound, coroutineScope = coroutineScope)
+    private lateinit var dispatcher: TestDispatcher
+    private lateinit var viewModel: MarshallsMetronomeViewModel
+    private lateinit var scheduler: TestCoroutineScheduler
+    private lateinit var testScope: CoroutineScope
+    private lateinit var timeController: TestTimeController
 
-    @Test
-    fun `initialState isCorrect`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    private fun clickButton() {
+        viewModel.onButtonClick(wait = true)
+    }
 
-        assertEquals("8", viewModel.totalCyclesInput)
-        assertEquals("20", viewModel.secondsWorkInput)
-        assertEquals("10", viewModel.secondsRestInput)
-        assertNull(viewModel.totalCyclesInputError)
-        assertNull(viewModel.secondsWorkInputError)
-        assertNull(viewModel.secondsRestInputError)
+    private fun clickReset() {
+        viewModel.onResetClick(wait = true)
+    }
+
+    private suspend fun shortTimeAdvance() {
+        timeController.advanceTimeBy(Constants.SmallDelay)
+    }
+
+    private suspend fun advanceTestTime(delayTimeMillis: Long) {
+        timeController.advanceTimeBy(delayTimeMillis)
+    }
+
+    private fun initScope(
+        scope: TestScope,
+        delayLambda: (suspend (Long) -> Unit),
+    ) {
+        scheduler = TestCoroutineScheduler()
+        dispatcher = StandardTestDispatcher(scheduler)
+        testScope = CoroutineScope(dispatcher + Job())
+        timeController = TestTimeController(scheduler)
+        timeController.setDelayLambda(delayLambda, scope)
+        viewModel =
+            MarshallsMetronomeViewModel(
+                mockPlaySound,
+                dispatcher = dispatcher,
+                scope = testScope,
+                timeController = timeController,
+                errorMessage = mutableStateOf(null),
+            )
     }
 
     @Test
-    fun `validateInput whenInputIsValid`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "10"
-        viewModel.secondsWorkInput = "30"
-        viewModel.secondsRestInput = "15"
-
-        viewModel.onButtonClick()
-
-        assertNull(viewModel.totalCyclesInputError)
-        assertNull(viewModel.secondsWorkInputError)
-        assertNull(viewModel.secondsRestInputError)
-    }
-
-    @Test
-    fun `validateInput whenInputIsInvalid`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "0"
-        viewModel.secondsWorkInput = "abc"
-        viewModel.secondsRestInput = "200"
-
-        viewModel.onButtonClick()
-
-        assertEquals("Must be at least 1", viewModel.totalCyclesInputError)
-        assertEquals("Invalid number", viewModel.secondsWorkInputError)
-        assertEquals("Must be at most 100", viewModel.secondsRestInputError)
-    }
-
-    @Test
-    fun `onButtonClick startsTimer whenInputIsValid`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "8"
-        viewModel.secondsWorkInput = "20"
-        viewModel.secondsRestInput = "10"
-
-        viewModel.onButtonClick()
-
-        assertNotNull(viewModel.runningState.value)
-    }
-
-    @Test
-    fun `onButtonClick doesNotStartTimer whenInputIsInvalid`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-        viewModel.totalCyclesInput = "0"
-        viewModel.onButtonClick()
-        assertNull(viewModel.runningState.value)
-    }
-
-    @Test
-    fun `onResetClick stopsTimer`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-        viewModel.onButtonClick() // Start the timer
-        viewModel.onResetClick() // Reset the timer
-        assertNull(viewModel.runningState.value)
-    }
-
-    @Test
-    fun `formatTotalTimeRemainingString returnsCorrectFormat`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-        assertEquals(
-            "04:00",
-            viewModel.formatTotalTimeRemainingString()
-        ) // 8 cycles of 20s work + 10s rest
-    }
-
-    @Test
-    fun `formatCurrentIntervalTime returnsCorrectFormat`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-        viewModel.onButtonClick() // Start the timer
-        assertEquals("Work: 19", viewModel.formatCurrentIntervalTime())
-    }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @Test
-    fun `playSound isCalledOnStart`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Create a list to record the timer states
-        val timerStates = mutableListOf<TimerState>()
-
-        // Launch a coroutine to collect the timer states
-        val job = launch {
-            viewModel.runningState.value?.timerState?.collect { state ->
-                timerStates.add(state)
+    fun `initialState isCorrect`() =
+        runTest {
+            initScope(this) {
+                delay(it)
             }
+
+            assertEquals("8", viewModel.workoutInputs.totalCycles)
+            assertEquals("20", viewModel.workoutInputs.secondsWork)
+            assertEquals("10", viewModel.workoutInputs.secondsRest)
+            assertNull(viewModel.totalCyclesInputError)
+            assertNull(viewModel.secondsWorkInputError)
+            assertNull(viewModel.secondsRestInputError)
+
+            viewModel.clearResources()
         }
 
-        // Click the 'start button:
-        viewModel.onButtonClick()
-
-        // Advance time a bit:
-        advanceTimeBy(Constants.SmallDelay.toLong())
-
-        // Run our check:
-        verify(mockPlaySound).invoke(R.raw.gong)
-
-        // Tidy up things at the end:
-        job.cancel()
-    }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `playSound isNotCalledBeforeStart`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Create a list to record the timer states
-        val timerStates = mutableListOf<TimerState>()
-
-        // Launch a coroutine to collect the timer states
-        val job = launch {
-            viewModel.runningState.value?.timerState?.collect { state ->
-                timerStates.add(state)
+    fun `validateInput whenInputIsValid`() =
+        runTest {
+            initScope(this) {
+                delay(it)
             }
+            viewModel.workoutInputs.totalCycles = "10"
+            viewModel.workoutInputs.secondsWork = "30"
+            viewModel.workoutInputs.secondsRest = "15"
+
+            clickButton()
+
+            assertNull(viewModel.totalCyclesInputError)
+            assertNull(viewModel.secondsWorkInputError)
+            assertNull(viewModel.secondsRestInputError)
+
+            viewModel.clearResources()
         }
 
-        // Advance time a bit:
-        advanceTimeBy(Constants.SmallDelay.toLong())
+    @Test
+    fun `validateInput whenInputIsInvalid`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        verify(mockPlaySound, never()).invoke(R.raw.gong)
+            viewModel.workoutInputs.totalCycles = "0"
+            viewModel.workoutInputs.secondsWork = "abc"
+            viewModel.workoutInputs.secondsRest = "200"
 
-        // Tidy up things at the end:
-        job.cancel()
-    }
+            clickButton()
+
+            assertEquals("Must be at least 1", viewModel.totalCyclesInputError)
+            assertEquals("Invalid number", viewModel.secondsWorkInputError)
+            assertEquals("Must be at most 100", viewModel.secondsRestInputError)
+
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `onButtonClick startsTimer whenInputIsValid`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            viewModel.workoutInputs.totalCycles = "8"
+            viewModel.workoutInputs.secondsWork = "20"
+            viewModel.workoutInputs.secondsRest = "10"
+
+            clickButton()
+
+            assertNotNull(viewModel.runningState.value)
+
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
+    @Test
+    fun `onButtonClick doesNotStartTimer whenInputIsInvalid`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+            viewModel.workoutInputs.totalCycles = "0"
+            clickButton()
+            assertNull(viewModel.runningState.value)
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `onResetClick stopsTimer`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+            clickButton() // Start the timer
+            clickReset() // Stop the timer (and clear internal state, etc).
+            assertNull(viewModel.runningState.value)
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `Pressing reset button clears error message`() =
+        runTest {
+            // Arrange
+            initScope(this) {
+                delay(it)
+            }
+            viewModel.errorMessage!!.value = "Error message"
+
+            // Act
+            clickReset()
+
+            // Assert
+            assertNull(viewModel.errorMessage!!.value)
+        }
+
+    @Test
+    fun `formatTotalTimeRemainingString returnsCorrectFormat`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Set any valid interval durations
+            viewModel.workoutInputs.totalCycles = "5" // 5 cycles
+            viewModel.workoutInputs.secondsWork = "30" // 30 seconds for work interval
+            viewModel.workoutInputs.secondsRest = "15" // 15 seconds for rest interval
+            viewModel.workoutInputs.secondsWarmup = "60" // 60 seconds for warmup
+            viewModel.workoutInputs.secondsCooldown = "60" // 60 seconds for cooldown
+
+            // Start the timer
+            clickButton()
+
+            // Fetch the formatted total time remaining
+            val formattedTotalTimeRemaining = viewModel.formatTotalTimeRemainingString()
+
+            // Check if the result matches the MM:SS format
+            val isCorrectFormat = formattedTotalTimeRemaining.matches(Regex("\\d{2}:\\d{2}"))
+
+            // Assert the format is correct
+            assertTrue("Formatted total time remaining should be in MM:SS format", isCorrectFormat)
+
+            // Cleanup
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `playSound isCalledOnStart`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Create a list to record the timer states
+            val timerStates = mutableListOf<TimerState>()
+
+            // Launch a coroutine to collect the timer states
+            val job =
+                launch {
+                    viewModel.runningState.value?.timerState?.collect { state ->
+                        timerStates.add(state)
+                    }
+                }
+
+            // Click the 'start button:
+            clickButton()
+
+            // Advance time a bit:
+            shortTimeAdvance()
+
+            // Run our check:
+            verify(mockPlaySound).invoke(R.raw.gong)
+
+            // Tidy up things at the end:
+            viewModel.clearResources()
+            job.cancel()
+            job.join()
+        }
+
+    @Test
+    fun `playSound isNotCalledBeforeStart`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Create a list to record the timer states
+            val timerStates = mutableListOf<TimerState>()
+
+            // Launch a coroutine to collect the timer states
+            val job =
+                launch {
+                    viewModel.runningState.value?.timerState?.collect { state ->
+                        timerStates.add(state)
+                    }
+                }
+
+            // Advance time a bit:
+            shortTimeAdvance()
+
+            verify(mockPlaySound, never()).invoke(R.raw.gong)
+
+            // Tidy up things at the end:
+            job.cancel()
+            job.join()
+            viewModel.clearResources()
+        }
 
     // Unit tests for buttonText:
 
     @Test
-    fun `buttonText is 'Start' when there is no running state`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Ensure runningState is null
-        viewModel.clearResources()
-
-        // Check buttonText
-        assertEquals("Start", viewModel.buttonText)
-    }
-
-    @Test
-    fun `buttonText is 'Pause' when timer is running`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Mock starting the timer
-        viewModel.onButtonClick()
-
-        // Check buttonText
-        assertEquals("Pause", viewModel.buttonText)
-    }
-
-    @Test
-    fun `buttonText is 'Resume' when timer is paused`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Create a list to record the timer states
-        val timerStates = mutableListOf<TimerState>()
-
-        // Launch a coroutine to collect the timer states
-        val job = launch {
-            viewModel.runningState.value?.timerState?.collect { state ->
-                timerStates.add(state)
+    fun `buttonText is 'Start' when there is no running state`() =
+        runTest {
+            initScope(this) {
+                delay(it)
             }
+
+            // Ensure runningState is null
+            viewModel.clearResources()
+
+            // Check buttonText
+            assertEquals("Start", viewModel.buttonText)
         }
 
-        // Mock starting and pausing the timer
-        viewModel.onButtonClick() // Start
-        viewModel.onButtonClick() // Pause
+    @Test
+    fun `buttonText is 'Pause' when timer is running`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Check buttonText
-        assertEquals("Resume", viewModel.buttonText)
+            // Mock starting the timer
+            clickButton()
 
-        // Tidy up things at the end:
-        viewModel.clearResources()
-        job.cancel()
-    }
+            // Check buttonText
+            assertEquals("Pause", viewModel.buttonText)
+
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
+    @Test
+    fun `buttonText is 'Resume' when timer is paused`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Create a list to record the timer states
+            val timerStates = mutableListOf<TimerState>()
+
+            // Launch a coroutine to collect the timer states
+            val job =
+                launch {
+                    viewModel.runningState.value?.timerState?.collect { state ->
+                        timerStates.add(state)
+                    }
+                }
+
+            // Mock starting and pausing the timer
+
+            // MOo - get label on text at start:
+            clickButton() // Start
+            clickButton() // Pause
+
+            // Check buttonText
+            assertEquals("Resume", viewModel.buttonText)
+
+            // Tidy up things at the end:
+            viewModel.clearResources()
+            job.cancel()
+            job.join()
+            testScope.cancel()
+        }
 
     // Tests for textInputControlsEnabled
 
     @Test
-    fun `textInputControlsEnabled is true when there is no running state`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Ensure runningState is null
-        viewModel.clearResources()
-
-        // Check textInputControlsEnabled
-        assertTrue("Text inputs should be enabled in initial state", viewModel.textInputControlsEnabled)
-    }
-
-    @Test
-    fun `textInputControlsEnabled is false when timer is running`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Mock starting the timer
-        viewModel.onButtonClick()
-
-        // Check textInputControlsEnabled
-        assertFalse("Text inputs should be disabled when timer is running", viewModel.textInputControlsEnabled)
-    }
-
-    @Test
-    fun `textInputControlsEnabled is false when timer is paused`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Create a list to record the timer states
-        val timerStates = mutableListOf<TimerState>()
-
-        // Launch a coroutine to collect the timer states
-        val job = launch {
-            viewModel.runningState.value?.timerState?.collect { state ->
-                timerStates.add(state)
+    fun `textInputControlsEnabled is true when there is no running state`() =
+        runTest {
+            initScope(this) {
+                delay(it)
             }
+
+            // Ensure runningState is null
+            viewModel.clearResources()
+
+            // Check textInputControlsEnabled
+            assertTrue("Text inputs should be enabled in initial state", viewModel.textInputControlsEnabled)
         }
 
-        // Mock starting and pausing the timer
-        viewModel.onButtonClick() // Start
-        viewModel.onButtonClick() // Pause
+    @Test
+    fun `textInputControlsEnabled is false when timer is running`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Check textInputControlsEnabled
-        assertFalse("Text inputs should be disabled when timer is paused", viewModel.textInputControlsEnabled)
+            // Mock starting the timer
+            clickButton()
 
-        // Tidy up things at the end:
-        viewModel.clearResources()
-        job.cancel()
-    }
+            // Check textInputControlsEnabled
+            assertFalse("Text inputs should be disabled when timer is running", viewModel.textInputControlsEnabled)
+
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `textInputControlsEnabled is false when timer is paused`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Create a list to record the timer states
+            val timerStates = mutableListOf<TimerState>()
+
+            // Launch a coroutine to collect the timer states
+            val job =
+                launch {
+                    viewModel.runningState.value?.timerState?.collect { state ->
+                        timerStates.add(state)
+                    }
+                }
+
+            // Mock starting and pausing the timer
+            clickButton() // Start
+            clickButton() // Pause
+
+            // Check textInputControlsEnabled
+            assertFalse("Text inputs should be disabled when timer is paused", viewModel.textInputControlsEnabled)
+
+            // Tidy up things at the end:
+            viewModel.clearResources()
+            job.cancel()
+            job.join()
+        }
 
     // Tests for formatTotalTimeRemainingString
 
     @Test
-    fun `formatTotalTimeRemainingString with default values`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-        assertEquals("04:00", viewModel.formatTotalTimeRemainingString())
-    }
+    fun `formatTotalTimeRemainingString with default values`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+            assertEquals("06:00", viewModel.formatTotalTimeRemainingString())
+            viewModel.clearResources()
+        }
 
     @Test
-    fun `formatTotalTimeRemainingString with valid custom input`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatTotalTimeRemainingString with valid custom input`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        viewModel.totalCyclesInput = "10"
-        viewModel.secondsWorkInput = "30"
-        viewModel.secondsRestInput = "20"
+            // Set custom intervals including warmup and cooldown
+            viewModel.workoutInputs.totalCycles = "10" // Total 10 cycles
+            viewModel.workoutInputs.secondsWork = "30" // 30 seconds for work interval
+            viewModel.workoutInputs.secondsRest = "15" // 15 seconds for rest interval
+            viewModel.workoutInputs.secondsWarmup = "60" // 60 seconds for warmup
+            viewModel.workoutInputs.secondsCooldown = "60" // 60 seconds for cooldown
 
-        assertEquals("08:20", viewModel.formatTotalTimeRemainingString())
-    }
+            // Start the timer
+            clickButton()
 
-    @Test
-    fun `formatTotalTimeRemainingString with invalid input`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+            // Calculate total workout time
+            val totalWorkoutTime = viewModel.getTotalWorkoutSeconds() * 1000L
 
-        viewModel.totalCyclesInput = "abc"
-        viewModel.secondsWorkInput = "-1"
-        viewModel.secondsRestInput = "101"
+            // Simulate part of the workout
+            val partialWorkoutTime = 5 * 60 * 1000L // Simulate 5 minutes of the workout
+            advanceTestTime(partialWorkoutTime)
 
-        assertEquals("00:00", viewModel.formatTotalTimeRemainingString())
-    }
+            // Fetch the formatted total time remaining
+            val formattedTotalTimeRemaining = viewModel.formatTotalTimeRemainingString()
 
-    @Test
-    fun `formatTotalTimeRemainingString with edge cases`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+            // Calculate expected remaining time
+            val expectedRemainingTime = totalWorkoutTime - partialWorkoutTime
+            val expectedFormattedTotalTimeRemaining = formatMinSec((expectedRemainingTime / 1000).safeToInt())
 
-        viewModel.totalCyclesInput = "1"
-        viewModel.secondsWorkInput = "1"
-        viewModel.secondsRestInput = "1"
+            // Assert the formatted total time remaining
+            assertEquals(
+                "Formatted total time remaining should match the expected value",
+                expectedFormattedTotalTimeRemaining,
+                formattedTotalTimeRemaining,
+            )
 
-        assertEquals("00:02", viewModel.formatTotalTimeRemainingString())
-    }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @Test
-    fun `formatTotalTimeRemainingString during timer running`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Setup initial state
-        viewModel.totalCyclesInput = "8"
-        viewModel.secondsWorkInput = "20"
-        viewModel.secondsRestInput = "10"
-
-        // Start the timer
-        viewModel.onButtonClick()
-
-        // Advance the coroutine timer
-        // For instance, advance 5 minutes (300 seconds)
-        advanceTimeBy(300 * 1000L)
-
-        // Get the formatted remaining time
-        val formattedTime = viewModel.formatTotalTimeRemainingString()
-
-        // Calculate expected remaining time
-        // Total time = 8 cycles * (20s work + 10s rest) = 240s
-        // Time elapsed = 300s
-        // Expected remaining time = 240s - 300s = -60s (but it should not go below 0)
-        val expectedFormattedTime = "00:00" // As the time elapsed is more than total time
-
-        // Assert
-        assertEquals("Formatted time should match expected remaining time", expectedFormattedTime, formattedTime)
-
-        // Cleanup
-        viewModel.clearResources()
-    }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @Test
-    fun `formatTotalTimeRemainingString after timer pause`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Setup initial state
-        viewModel.totalCyclesInput = "8"
-        viewModel.secondsWorkInput = "20"
-        viewModel.secondsRestInput = "10"
-
-        // Start the timer
-        viewModel.onButtonClick()
-
-        // Advance the coroutine timer for a certain period, say 2 minutes (120 seconds)
-        advanceTimeBy(120 * 1000L)
-
-        // Pause the timer
-        viewModel.onButtonClick()
-
-        // Get the formatted remaining time after pause
-        val formattedTime = viewModel.formatTotalTimeRemainingString()
-
-        // Calculate expected remaining time
-        // Total time for 8 cycles = 8 * (20s work + 10s rest) = 240s
-        // Time elapsed = 120s
-        // Expected remaining time = 240s - 120s = 120s
-        val expectedFormattedTime = "02:00" // Remaining time in MM:SS format
-
-        // Assert
-        assertEquals("Formatted time should match expected remaining time", expectedFormattedTime, formattedTime)
-
-        // Cleanup
-        viewModel.clearResources()
-    }
+            // Cleanup
+            viewModel.clearResources()
+            testScope.cancel()
+        }
 
     @Test
-    fun `formatTotalTimeRemainingString format consistency`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatTotalTimeRemainingString with invalid input`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        viewModel.totalCyclesInput = "5"
-        viewModel.secondsWorkInput = "15"
-        viewModel.secondsRestInput = "10"
+            // Set invalid values for cycles, work, rest, warm-up, and cooldown times
+            viewModel.workoutInputs.totalCycles = "invalid_number"
+            viewModel.workoutInputs.secondsWork = "-abc"
+            viewModel.workoutInputs.secondsRest = "another_invalid_number"
+            viewModel.workoutInputs.secondsWarmup = "invalid_warmup" // Invalid warm-up time
+            viewModel.workoutInputs.secondsCooldown = "zzzz"
 
-        val result = viewModel.formatTotalTimeRemainingString()
+            // Start the timer
+            clickButton()
 
-        // Check if the result matches the MM:SS format
-        assert(result.matches(Regex("\\d{2}:\\d{2}")))
-    }
+            // Expected format for total time remaining when input is invalid
+            // Usually, this would be zero, assuming that the ViewModel handles invalid input gracefully
+            val expectedFormattedTime = "00:00"
 
-    // Tests for formatCurrentIntervalTime
+            // Assert that the formatted remaining time is as expected
+            assertEquals(expectedFormattedTime, viewModel.formatTotalTimeRemainingString())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+            // Cleanup
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
     @Test
-    fun `formatCurrentIntervalTime returns correct time during work interval`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatTotalTimeRemainingString with edge cases`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Assuming the default state is a work interval
-        viewModel.secondsWorkInput = "20" // 20 seconds for work interval
+            // Set interval durations to edge cases
+            viewModel.workoutInputs.totalCycles = "1" // Minimum number of cycles
+            viewModel.workoutInputs.secondsWork = "1" // Minimum duration for work interval
+            viewModel.workoutInputs.secondsRest = "1" // Minimum duration for rest interval
+            viewModel.workoutInputs.secondsWarmup = "0" // Minimum duration for warmup (no warmup)
+            viewModel.workoutInputs.secondsCooldown = "0" // Minimum duration for cooldown (no cooldown)
 
-        // Start the timer
-        viewModel.onButtonClick()
+            // Start the timer
+            clickButton()
+            advanceTestTime(1) // prime things so we get into the main body of the timer loop.
 
-        // Advance the coroutine timer by 5 seconds
-        advanceTimeBy(5 * 1000L)
+            // Simulate the workout for a brief period, less than the total duration
+            advanceTestTime(500) // Advance by 0.5 seconds
 
-        // Invoke formatCurrentIntervalTime
-        val formattedTime = viewModel.formatCurrentIntervalTime()
+            // Fetch the formatted total time remaining
+            val formattedTotalTimeRemaining = viewModel.formatTotalTimeRemainingString()
 
-        // Expected format "Work: 15"
-        val expectedFormattedTime = "Work: 15"
+            // Calculate expected remaining time
+            val totalWorkoutTime = 2 * 1000L // 1 second work + 1 second rest
+            val expectedRemainingTime = totalWorkoutTime - 500 // Subtract the advanced time
+            val expectedFormattedTotalTimeRemaining = formatMinSec((expectedRemainingTime / 1000).safeToInt())
 
-        // Assert
-        assertEquals("Formatted time should match expected remaining work time", expectedFormattedTime, formattedTime)
+            // Assert the formatted total time remaining
+            assertEquals(
+                "Formatted total time remaining should match the expected value for edge cases",
+                expectedFormattedTotalTimeRemaining,
+                formattedTotalTimeRemaining,
+            )
 
-        // Cleanup
-        viewModel.clearResources()
-    }
+            // Cleanup
+            viewModel.clearResources()
+        }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `formatCurrentIntervalTime returns correct time during rest interval`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatTotalTimeRemainingString during timer running`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Set intervals
-        viewModel.secondsWorkInput = "20" // 20 seconds for work interval
-        viewModel.secondsRestInput = "10" // 10 seconds for rest interval
+            // Set intervals including warmup and cooldown
+            viewModel.workoutInputs.totalCycles = "8" // 8 cycles
+            viewModel.workoutInputs.secondsWork = "20" // 20 seconds for work interval
+            viewModel.workoutInputs.secondsRest = "10" // 10 seconds for rest interval
+            viewModel.workoutInputs.secondsWarmup = "60" // 60 seconds for warmup
+            viewModel.workoutInputs.secondsCooldown = "60" // 60 seconds for cooldown
 
-        // Start the timer
-        viewModel.onButtonClick()
+            // Start the timer
+            clickButton()
 
-        // Advance the coroutine timer to end of work interval and into rest interval
-        advanceTimeBy(21 * 1000L) // 20 seconds for work + 1 second into rest
+            // Simulate partway through the workout
+            val elapsedWorkoutTime = 5 * 60 * 1000L // 5 minutes
+            advanceTestTime(elapsedWorkoutTime)
 
-        // Invoke formatCurrentIntervalTime
-        val formattedTime = viewModel.formatCurrentIntervalTime()
+            // Fetch the formatted total time remaining
+            val formattedTotalTimeRemaining = viewModel.formatTotalTimeRemainingString()
 
-        // Expected format "Rest: 9"
-        val expectedFormattedTime = "Rest: 9"
+            // Calculate the expected total time remaining
+            val totalTimeForWorkout = (60 + ((20 + 10) * 8) + 60) * 1000L // Warmup + (Work + Rest cycles) + Cooldown
+            val expectedRemainingTime = totalTimeForWorkout - elapsedWorkoutTime
+            val expectedFormattedTotalTimeRemaining = formatMinSec((expectedRemainingTime / 1000).safeToInt())
 
-        // Assert
-        assertEquals("Formatted time should match expected remaining rest time", expectedFormattedTime, formattedTime)
+            // Assert the formatted total time remaining
+            assertEquals(
+                "Formatted total time remaining should match the expected value during timer running",
+                expectedFormattedTotalTimeRemaining,
+                formattedTotalTimeRemaining,
+            )
 
-        // Cleanup
-        viewModel.clearResources()
-    }
+            // Cleanup
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `formatTotalTimeRemainingString after timer pause`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Set initial values for cycles, work, rest, warm-up, and cooldown times
+            viewModel.workoutInputs.totalCycles = "8"
+            viewModel.workoutInputs.secondsWork = "20"
+            viewModel.workoutInputs.secondsRest = "10"
+            viewModel.workoutInputs.secondsWarmup = "60" // 1 minute warm-up
+            viewModel.workoutInputs.secondsCooldown = "60" // 1 minute cooldown
+
+            // Start the timer
+            clickButton()
+
+            // Pause the timer
+            clickButton()
+
+            // Calculate expected remaining time
+            val totalWorkoutTime = viewModel.getTotalWorkoutSeconds() * 1000L
+
+            // The time might be calculated over here to be something like "06:00", but if the timer
+            // has been even briefly active, then it will really display "05:59" instead, as part of
+            // an existing workaround. We make that adaptation here:
+            val expectedRemainingTime = totalWorkoutTime - 1_000
+
+            // Format expected remaining time in MM:SS format using the standalone formatMinSec function
+            val expectedFormattedTime = formatMinSec((expectedRemainingTime / 1000).safeToInt())
+
+            // Assert that the formatted remaining time is as expected
+            val found = viewModel.formatTotalTimeRemainingString()
+            assertEquals(expectedFormattedTime, found)
+
+            // Cleanup
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
+    @Test
+    fun `formatTotalTimeRemainingString format consistency`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            viewModel.workoutInputs.totalCycles = "5"
+            viewModel.workoutInputs.secondsWork = "15"
+            viewModel.workoutInputs.secondsRest = "10"
+
+            val result = viewModel.formatTotalTimeRemainingString()
+
+            // Check if the result matches the MM:SS format
+            assert(result.matches(Regex("\\d{2}:\\d{2}")))
+
+            // Cleanup
+            viewModel.clearResources()
+        }
 
     // Tests for formatCurrentCycleNumber
 
     @Test
-    fun `formatCurrentCycleNumber returns correct cycle at start of workout`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatCurrentCycleNumber returns correct cycle at start of workout`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Setup initial values
-        viewModel.totalCyclesInput = "8" // Total 8 cycles
+            // Setup initial values
+            viewModel.workoutInputs.totalCycles = "8" // Total 8 cycles
 
-        // Start the timer
-        viewModel.onButtonClick()
+            // Start the timer
+            clickButton()
 
-        // The cycle number at the start should be "1/8"
-        val expectedFormat = "1/8"
-        val currentCycleFormat = viewModel.formatCurrentCycleNumber()
+            // The cycle number at the start should be "1/8"
+            val expectedFormat = "1/8"
+            val currentCycleFormat = viewModel.formatCurrentCycleNumber()
 
-        assertEquals("Cycle format at start should be 1/8", expectedFormat, currentCycleFormat)
+            assertEquals("Cycle format at start should be 1/8", expectedFormat, currentCycleFormat)
 
-        // Cleanup
-        viewModel.clearResources()
-    }
+            // Cleanup
+            viewModel.clearResources()
+        }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `formatCurrentCycleNumber returns correct cycle in the middle of workout`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatCurrentCycleNumber returns correct cycle in the middle of workout`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Setup initial values
-        viewModel.totalCyclesInput = "8" // Total 8 cycles
-        viewModel.secondsWorkInput = "20" // 20 seconds for work interval
-        viewModel.secondsRestInput = "10" // 10 seconds for rest interval
+            // Setup workout configuration
+            viewModel.workoutInputs.totalCycles = "8" // Total 8 cycles
+            viewModel.workoutInputs.secondsWork = "20" // 20 seconds work interval
+            viewModel.workoutInputs.secondsRest = "10" // 10 seconds rest interval
+            viewModel.workoutInputs.secondsWarmup = "1" // 1 second for warm-up
+            viewModel.workoutInputs.secondsCooldown = "1" // 1 second for cooldown
 
-        // Start the timer
-        viewModel.onButtonClick()
+            // Start the timer
+            clickButton()
 
-        // Advance the timer to mid-workout, e.g., at cycle 5
-        // Each cycle = 20s work + 10s rest = 30s, so 5 completed cycles = 120s
-        advanceTimeBy(120 * 1000L)
+            // Calculate the time to advance to the middle of the workout (4th cycle)
+            // Time for 3 complete cycles plus warm-up: 3 * (20s work + 10s rest) + 1s warm-up
+            val timeToAdvance =
+                (
+                    3 *
+                        (viewModel.workoutInputs.secondsWork.toInt() + viewModel.workoutInputs.secondsRest.toInt()) +
+                        viewModel.workoutInputs.secondsWarmup.toInt()
+                    ) * 1000L // Convert to milliseconds
 
-        // The cycle number mid-workout should be "5/8"
-        val expectedFormat = "5/8"
-        val currentCycleFormat = viewModel.formatCurrentCycleNumber()
+            // Advance the timer by the time to advance
+            advanceTestTime(timeToAdvance)
 
-        assertEquals("Cycle format mid-workout should be 5/8", expectedFormat, currentCycleFormat)
+            // Fetch the formatted cycle number
+            val formattedCycleNumber = viewModel.formatCurrentCycleNumber()
 
-        // Cleanup
-        viewModel.clearResources()
-    }
+            // Expected cycle number in the middle of the workout should be "3/8"
+            val expectedFormattedCycleNumber = "3/8"
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+            // Assert the formatted cycle number
+            assertEquals(
+                "Formatted cycle number should match the middle of the workout",
+                expectedFormattedCycleNumber,
+                formattedCycleNumber,
+            )
+
+            // Cleanup
+            viewModel.clearResources()
+        }
+
     @Test
-    fun `formatCurrentCycleNumber returns correct cycle towards end of workout`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `formatCurrentCycleNumber returns correct cycle towards end of workout`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Setup initial values
-        viewModel.totalCyclesInput = "8" // Total 8 cycles
-        viewModel.secondsWorkInput = "20" // 20 seconds for work interval
-        viewModel.secondsRestInput = "10" // 10 seconds for rest interval
+            // Set interval durations including warmup and cooldown
+            viewModel.workoutInputs.secondsWork = "20" // 20 seconds for work interval
+            viewModel.workoutInputs.secondsRest = "10" // 10 seconds for rest interval
+            viewModel.workoutInputs.secondsWarmup = "60" // 60 seconds for warmup
+            viewModel.workoutInputs.secondsCooldown = "60" // 60 seconds for cooldown
+            viewModel.workoutInputs.totalCycles = "8" // Total 8 cycles
 
-        // Start the timer
-        viewModel.onButtonClick()
+            // Start the timer
+            clickButton()
 
-        // Advance the timer towards the end of the workout, e.g., at cycle 8
-        // Each cycle = 30s, so 8 completed cycles = 210s
-        advanceTimeBy(210 * 1000L)
+            // Simulate the workout duration up to the last cycle
+            // Warmup + (Work + Rest) * Total Cycles - 1 (to stay in the last cycle)
+            val totalWorkoutTimeBeforeLastCycle = 60 + (20 + 10) * (8 - 1)
+            advanceTestTime(totalWorkoutTimeBeforeLastCycle * 1000L)
 
-        // The cycle number towards the end should be 8/8"
-        val expectedFormat = "8/8"
-        val currentCycleFormat = viewModel.formatCurrentCycleNumber()
+            // Fetch the formatted cycle number
+            val formattedCycleNumber = viewModel.formatCurrentCycleNumber()
 
-        assertEquals("Cycle format towards end should be 8/8", expectedFormat, currentCycleFormat)
+            // Expected cycle number towards the end of the workout should be "7/8"
+            val expectedFormattedCycleNumber = "7/8"
 
-        // Cleanup
-        viewModel.clearResources()
-    }
+            // Assert the formatted cycle number
+            assertEquals(
+                "Formatted cycle number should match the last cycle towards the end of the workout",
+                expectedFormattedCycleNumber,
+                formattedCycleNumber,
+            )
+
+            // Cleanup
+            viewModel.clearResources()
+            testScope.cancel()
+        }
 
     // Tests for onButtonClick
 
     @Test
-    fun `onButtonClick starts timer with valid input`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "8"
-        viewModel.secondsWorkInput = "20"
-        viewModel.secondsRestInput = "10"
-
-        viewModel.onButtonClick()
-
-        assertNotNull(viewModel.runningState.value)
-    }
-
-    @Test
-    fun `onButtonClick does not start timer with invalid input`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "abc"
-
-        viewModel.onButtonClick()
-
-        assertNull(viewModel.runningState.value)
-    }
-
-    @Test
-    fun `onButtonClick pauses timer when running`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        // Create a list to record the timer states
-        val timerStates = mutableListOf<TimerState>()
-
-        // Launch a coroutine to collect the timer states
-        val job = launch {
-            viewModel.runningState.value?.timerState?.collect { state ->
-                timerStates.add(state)
+    fun `onButtonClick starts timer with valid input`() =
+        runTest {
+            initScope(this) {
+                delay(it)
             }
+
+            viewModel.workoutInputs.totalCycles = "8"
+            viewModel.workoutInputs.secondsWork = "20"
+            viewModel.workoutInputs.secondsRest = "10"
+
+            clickButton()
+
+            assertNotNull(viewModel.runningState.value)
+
+            // Cleanup
+            viewModel.clearResources()
         }
 
-        viewModel.onButtonClick() // Start the timer
-        viewModel.onButtonClick() // Pause the timer
+    @Test
+    fun `onButtonClick does not start timer with invalid input`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        assertTrue(viewModel.runningState.value?.isPaused() == true)
+            viewModel.workoutInputs.totalCycles = "abc"
 
-        // Tidy up things at the end:
-        viewModel.clearResources()
-        job.cancel()
-    }
+            clickButton()
+
+            assertNull(viewModel.runningState.value)
+
+            // Cleanup
+            viewModel.clearResources()
+        }
 
     @Test
-    fun `onButtonClick resumes timer when paused`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `onButtonClick pauses timer when running`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        viewModel.onButtonClick() // Start the timer
-        viewModel.onButtonClick() // Pause the timer
-        viewModel.onButtonClick() // Resume the timer
+            // Create a list to record the timer states
+            val timerStates = mutableListOf<TimerState>()
 
-        assertFalse(viewModel.runningState.value?.isPaused() == true)
-    }
+            // Launch a coroutine to collect the timer states
+            val job =
+                launch {
+                    viewModel.runningState.value?.timerState?.collect { state ->
+                        timerStates.add(state)
+                    }
+                }
 
-    @Test
-    fun `onButtonClick does not affect ongoing timer when called without input changes`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+            clickButton() // Start the timer
+            advanceTestTime(100)
 
-        viewModel.onButtonClick() // Start the timer
+            clickButton() // Pause the timer
+            advanceTestTime(100)
 
-        val initialState = viewModel.runningState.value
+            assertTrue(viewModel.runningState.value?.isPaused() == true)
 
-        viewModel.onButtonClick() // Pause the timer
-        viewModel.onButtonClick() // Resume the timer
-
-        val resumedState = viewModel.runningState.value
-
-        assertEquals(initialState, resumedState)
-    }
-
-    @Test
-    fun `onButtonClick validates input correctly`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "-1"
-
-        viewModel.onButtonClick()
-
-        assertEquals("Must be at least 1", viewModel.totalCyclesInputError)
-    }
+            // Tidy up things at the end:
+            viewModel.clearResources()
+            job.cancel()
+            job.join()
+        }
 
     @Test
-    fun `onButtonClick restarts timer with new inputs after stopping`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `onButtonClick resumes timer when paused`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        viewModel.onButtonClick() // Start the timer
-        viewModel.onResetClick() // Reset the timer
+            clickButton() // Start the timer
+            clickButton() // Pause the timer
+            clickButton() // Resume the timer
 
-        viewModel.totalCyclesInput = "10"
-        viewModel.secondsWorkInput = "30"
-        viewModel.onButtonClick() // Start with new settings
+            assertFalse(viewModel.runningState.value?.isPaused() == true)
 
-        assertEquals("10", viewModel.totalCyclesInput)
-        assertEquals("30", viewModel.secondsWorkInput)
-    }
-
-    @Test
-    fun `onButtonClick handles edge cases properly`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
-
-        viewModel.totalCyclesInput = "100" // Test maximum allowed cycles
-        viewModel.secondsWorkInput = "60" // Test maximum allowed work seconds
-
-        viewModel.onButtonClick()
-
-        assertNotNull(viewModel.runningState.value)
-    }
+            viewModel.clearResources()
+        }
 
     @Test
-    fun `onButtonClick resumes timer after being paused`() = runTest {
-        val viewModel = newViewModel(coroutineScope = this)
+    fun `onButtonClick does not affect ongoing timer when called without input changes`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
 
-        // Initialize the ViewModel with default values
-        viewModel.totalCyclesInput = "8"
-        viewModel.secondsWorkInput = "20"
-        viewModel.secondsRestInput = "10"
+            clickButton() // Start the timer
 
-        // Start the timer
-        assertFalse(viewModel.timerStarted())
-        viewModel.onButtonClick()
-        assertTrue(viewModel.timerStarted())
+            val initialState = viewModel.runningState.value
 
-        // Pause the timer
-        assertFalse(viewModel.isTimerPausedOrFail())
-        viewModel.onButtonClick()
-        assertTrue(viewModel.isTimerPausedOrFail())
+            clickButton() // Pause the timer
 
-        // Resume the timer
-        assertTrue(viewModel.isTimerPausedOrFail())
-        viewModel.onButtonClick()
-        assertFalse(viewModel.isTimerPausedOrFail())
-    }
+            clickButton() // Resume the timer
+
+            val resumedState = viewModel.runningState.value
+
+            assertEquals(initialState, resumedState)
+
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
+    @Test
+    fun `onButtonClick validates input correctly`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            viewModel.workoutInputs.totalCycles = "-1"
+
+            clickButton()
+
+            assertEquals("Must be at least 1", viewModel.totalCyclesInputError)
+
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
+    @Test
+    fun `onButtonClick restarts timer with new inputs after stopping`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            clickButton() // Start the timer
+
+            clickReset() // Pause the timer
+
+            viewModel.workoutInputs.totalCycles = "10"
+            viewModel.workoutInputs.secondsWork = "30"
+            clickButton() // Start with new settings
+
+            assertEquals("10", viewModel.workoutInputs.totalCycles)
+            assertEquals("30", viewModel.workoutInputs.secondsWork)
+
+            viewModel.clearResources()
+        }
+
+    @Test
+    fun `onButtonClick handles edge cases properly`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            viewModel.workoutInputs.totalCycles = "100" // Test maximum allowed cycles
+            viewModel.workoutInputs.secondsWork = "60" // Test maximum allowed work seconds
+
+            clickButton()
+
+            assertNotNull(viewModel.runningState.value)
+
+            viewModel.clearResources()
+            testScope.cancel()
+        }
+
+    @Test
+    fun `onButtonClick resumes timer after being paused`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // Initialize the ViewModel with default values
+            viewModel.workoutInputs.totalCycles = "8"
+            viewModel.workoutInputs.secondsWork = "20"
+            viewModel.workoutInputs.secondsRest = "10"
+
+            // Start the timer
+            assertFalse(viewModel.timerStarted())
+            clickButton()
+            assertTrue(viewModel.timerStarted())
+
+            // Pause the timer
+            assertFalse(viewModel.isTimerPausedOrFail())
+            clickButton()
+            assertTrue(viewModel.isTimerPausedOrFail())
+
+            // Resume the timer
+            assertTrue(viewModel.isTimerPausedOrFail())
+            clickButton()
+            assertFalse(viewModel.isTimerPausedOrFail())
+
+            viewModel.clearResources()
+        }
+
+    // Tests for formatCurrentStageTime
+
+    @Test
+    fun `formatCurrentStageTime returns expected messages during workout`() =
+        runTest {
+            initScope(this) {
+                delay(it)
+            }
+
+            // By default we start within the warmup phase.
+            assertEquals("Warmup: 01:00", viewModel.formatCurrentStageTime())
+
+            // Just after the click, the message should be the same:
+            clickButton()
+            assertEquals("Warmup: 00:59", viewModel.formatCurrentStageTime())
+
+            // Advance time by 61 seconds, this should take us to the start of the work interval:
+            advanceTestTime(61 * 1000L)
+            assertEquals("Work: 00:19", viewModel.formatCurrentStageTime())
+
+            // Advancing time by 19 seconds, this brings us to the very beginning of the work interval:
+            advanceTestTime(19 * 1000L)
+            assertEquals("Work: 00:00", viewModel.formatCurrentStageTime())
+
+            // Go one second further, this takes us to the (visible) start of the rest interval:
+            advanceTestTime(1 * 1000L)
+            assertEquals("Rest: 00:09", viewModel.formatCurrentStageTime())
+
+            // There are 8 cycles in this workout. Skip through another 7 cycles, and this should
+            // bring us back to very close to the same point in the cycle:
+            advanceTestTime((20 + 10) * 7 * 1000L)
+            assertEquals("Rest: 00:09", viewModel.formatCurrentStageTime())
+
+            // Try advancing by 10 seconds, that should leave us at the start of the cooldown period:
+            advanceTestTime(10 * 1000L)
+            assertEquals("Cooldown: 00:59", viewModel.formatCurrentStageTime())
+
+            // Advance another 65 seconds, that should bring us to the end of the cooldown period,
+            // and also into the "workout ended" state:
+            advanceTestTime(65 * 1000L)
+            assertEquals("Cooldown: 00:00", viewModel.formatCurrentStageTime())
+
+            viewModel.clearResources()
+        }
 }

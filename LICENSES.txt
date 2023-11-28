@@ -1,9 +1,21 @@
 Sound effect licenses:
 
+- airhorn.mp3
+  - Creator: jacksonacademyashmore
+  - License: Creative Commons 0
+  - Source: https://freesound.org/people/jacksonacademyashmore/sounds/414208/
+  - Note: Edited further for use in this project.
+
 - buzzer.mp3
   - Creator: hypocore
   - License: Creative Commons 0
   - Source: https://freesound.org/people/hypocore/sounds/164090/
+  - Note: Edited further for use in this project.
+
+- chimes.mp3
+  - Creator: 3bagbrew
+  - License: Attribution 4.0
+  - Source: https://freesound.org/people/3bagbrew/sounds/95336/
   - Note: Edited further for use in this project.
 
 - factory_whistle.mp3

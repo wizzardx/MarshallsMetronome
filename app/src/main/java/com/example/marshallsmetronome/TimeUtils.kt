@@ -25,33 +25,23 @@ fun formatMinSec(totalSeconds: Int): String {
 }
 
 /**
- * Calculate the total number of seconds for all cycles in the workout.
- *
- * This function takes the number of cycles and the duration of work and rest
- * intervals per cycle to compute the total duration of the workout program in seconds.
+ * Calculate the total number of seconds for all cycles in the workout, including warmup and cooldown.
  *
  * @param cycles Number of cycles in the workout program.
  * @param workSecondsPerCycle Duration of the work interval in each cycle, in seconds.
  * @param restSecondsPerCycle Duration of the rest interval in each cycle, in seconds.
- * @return Total duration of the workout program across all cycles, in seconds.
+ * @param warmupSeconds Duration of the warmup period, in seconds.
+ * @param cooldownSeconds Duration of the cooldown period, in seconds.
+ * @return Total duration of the workout program, including all cycles, warmup, and cooldown, in seconds.
  */
-fun getSecondsForAllCycles(
+fun getSecondsForEntireWorkout(
     cycles: Int,
     workSecondsPerCycle: Int,
-    restSecondsPerCycle: Int
-) = (workSecondsPerCycle + restSecondsPerCycle) * cycles
-
-/**
- * Calculate the duration of the first interval in a workout cycle.
- *
- * This function returns the number of seconds for the first interval,
- * which is typically the work interval at the beginning of each cycle.
- * It assumes that the first interval of each cycle is consistent in duration.
- *
- * @param workSecondsPerCycle Duration of the work interval for each cycle, in seconds.
- * @return Duration of the first interval (work interval) in seconds.
- */
-fun getSecondsForFirstInterval(
-    workSecondsPerCycle: Int
-) = workSecondsPerCycle
-
+    restSecondsPerCycle: Int,
+    warmupSeconds: Int,
+    cooldownSeconds: Int,
+): Int {
+    val totalSecondsPerCycle = workSecondsPerCycle + restSecondsPerCycle
+    val totalSecondsForCycles = totalSecondsPerCycle * cycles
+    return warmupSeconds + totalSecondsForCycles + cooldownSeconds
+}

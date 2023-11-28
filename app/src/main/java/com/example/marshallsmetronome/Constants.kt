@@ -27,7 +27,7 @@ object Constants {
     /**
      * In our logic we delay for short periods of time and then perform timer-related logic.
      */
-    const val SmallDelay = 100
+    const val SmallDelay = 100L
 
     /**
      * For the sake of simplicity, we limit the user to inputting numbers between 1 and 100.

@@ -46,7 +46,7 @@ fun getNextIntervalType(currentType: IntervalType) =
 fun getNextIntervalMilliseconds(
     nextIntervalType: IntervalType,
     workSecondsPerCycle: Int,
-    restSecondsPerCycle: Int
+    restSecondsPerCycle: Int,
 ) = when (nextIntervalType) {
     IntervalType.Work -> workSecondsPerCycle * Constants.MillisecondsPerSecond
     IntervalType.Rest -> restSecondsPerCycle * Constants.MillisecondsPerSecond
@@ -69,4 +69,3 @@ fun getNextIntervalMilliseconds(
 fun getNextCycleNumber(state: TimerState) =
     // Increment cycle number, ensuring it does not exceed total cycles
     (state.currentCycleNum + 1).coerceAtMost(state.totalCycles)
-
