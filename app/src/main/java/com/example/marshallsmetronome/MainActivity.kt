@@ -1,14 +1,5 @@
 package com.example.marshallsmetronome
 
-// TODO: If there is a user input error, then jump focus to the first input field with an error.
-
-// TODO: Audio is started perceptibly a bit late, check that?
-
-// TODO: Experiment with using Robolectric?
-
-// TODO: Experiment with recording tests with Espresso?
-
-// TODO: Experiment with Mutation testing again sometime, meh.
 
 import android.content.Context
 import android.content.pm.PackageManager
