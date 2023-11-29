@@ -1,3 +1,5 @@
+* So like I think start figuring out how to add ads, maybe at the bottom.
+
 * If there is a user input error, then jump focus to the first input field with an error.
 
 * Audio is started perceptibly a bit late, check that?
