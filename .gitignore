@@ -31,3 +31,6 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Secrets to be kept outside of revision control:
+secure.properties

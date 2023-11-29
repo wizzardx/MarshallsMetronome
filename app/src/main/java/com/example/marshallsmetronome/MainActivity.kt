@@ -1,8 +1,6 @@
 package com.example.marshallsmetronome
 
-
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
@@ -34,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -45,7 +42,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.marshallsmetronome.ui.theme.MarshallsMetronomeTheme
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import io.sentry.Sentry
 import io.sentry.android.core.SentryAndroid
@@ -87,18 +90,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Initialize the Mobile Ads SDK.
+        MobileAds.initialize(this) {}
+
         try {
             mediaPlayer = MediaPlayer()
         } catch (e: Exception) {
-            reportError(errorMessage, e)
-        } catch (e: Throwable) {
             reportError(errorMessage, e)
         }
         setContent {
             // Setup sentry
             SentryAndroid.init(this) { options ->
-                options.dsn = "https://b8f8c3b1376e020d8d215bc1badc5108@" +
-                    "o4506185094266880.ingest.sentry.io/4506185118515200" // Your DSN from Sentry
                 options.isDebug = true // Enable Sentry debug mode
                 // Set tracesSampleRate to 1.0 to capture 100% of transactions for performance monitoring.
                 // We recommend adjusting this value in production.
@@ -130,6 +132,35 @@ class MainActivity : ComponentActivity() {
 
         super.onDestroy()
     }
+}
+
+/**
+ * A Composable function that creates an Ad Banner using Google's Mobile Ads SDK.
+ *
+ * This function creates an AndroidView and initializes it with an AdView. The AdView is configured
+ * with the necessary parameters such as ad size, ad unit ID, and request configuration for test devices.
+ * The ad is then loaded and displayed in the AndroidView.
+ *
+ * The ad unit ID and test device IDs are retrieved from the BuildConfig.
+ */
+@Composable
+fun AdBanner() {
+    AndroidView(
+        factory = { context ->
+            // Initialize the request configuration for test device.
+            val deviceIds = BuildConfig.TEST_DEVICE_IDS.split(',')
+            val requestConfiguration = RequestConfiguration.Builder()
+                .setTestDeviceIds(deviceIds)
+                .build()
+            MobileAds.setRequestConfiguration(requestConfiguration)
+
+            AdView(context).apply {
+                setAdSize(AdSize.BANNER)
+                adUnitId = BuildConfig.ADMOB_AD_UNIT_ID
+                loadAd(AdRequest.Builder().build())
+            }
+        }
+    )
 }
 
 /**
@@ -405,21 +436,7 @@ object CoroutineUtils {
 /**
  * Return the version number of our app.
  */
-// We specifically want to catch the NameNotFoundException exception here, and return
-// "Unknown" if we can't get the version number. We don't care about the other details
-// related to the exception. Also, we catch the NullPointerException so that we can
-// show the Preview.-
-@Suppress("SwallowedException")
-fun getAppVersion(context: Context): String {
-    val unknown = "Unknown"
-    return try {
-        val packageManager = context.packageManager
-        val packageInfo = packageManager?.getPackageInfo(context.packageName, 0)
-        packageInfo?.versionName ?: unknown
-    } catch (e: PackageManager.NameNotFoundException) {
-        unknown
-    }
-}
+fun getAppVersion(): String = BuildConfig.VERSION_NAME
 
 /**
  * Display the total time remaining for the entire workout.
@@ -466,7 +483,7 @@ fun ControlButtons(
             Text(text = viewModel.buttonText, modifier = modifier)
         }
 
-        Spacer(modifier = modifier.width(10.dp))
+        Spacer(modifier = modifier.width(8.dp))
 
         Button(
             onClick = {
@@ -536,7 +553,7 @@ class InputTextFieldCreator(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             label = { Text(text = label) },
-            modifier = modifier.padding(top = 20.dp),
+            modifier = modifier.padding(8.dp),
             enabled = viewModel.textInputControlsEnabled,
             isError = errorInfo.hasError,
             supportingText = errorTextComposable,
@@ -611,8 +628,7 @@ fun MarshallsMetronome(
     val timerState = viewModel.runningState.value?.timerState?.collectAsState()
 
     // Get and remember (don't keep recomputing) the app version number:
-    val context = LocalContext.current
-    val appVersion = remember { getAppVersion(context) }
+    val appVersion = remember { getAppVersion() }
 
     // Enable automatic coroutine error handlers to update the UI:
     CoroutineUtils.errorMessage = errorMessage
@@ -637,7 +653,7 @@ fun MarshallsMetronome(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
-            .padding(30.dp)
+            .padding(8.dp)
             .verticalScroll(rememberScrollState()),
     ) {
         // Total time remaining
@@ -689,6 +705,8 @@ fun MarshallsMetronome(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+
+        AdBanner()
     }
 }
 

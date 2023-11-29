@@ -24,7 +24,7 @@
         </activity>
 
         <!-- Required: set your sentry.io project identifier (DSN) -->
-        <meta-data android:name="io.sentry.dsn" android:value="https://b8f8c3b1376e020d8d215bc1badc5108@o4506185094266880.ingest.sentry.io/4506185118515200" />
+        <meta-data android:name="io.sentry.dsn" android:value="${SENTRY_DSN}" />
 
         <!-- enable automatic breadcrumbs for user interactions (clicks, swipes, scrolls) -->
         <meta-data android:name="io.sentry.traces.user-interaction.enable" android:value="true" />
@@ -37,6 +37,10 @@
         <meta-data android:name="io.sentry.traces.sample-rate" android:value="1.0" />
         <!-- enable profiling when starting transactions, adjust in production env -->
         <meta-data android:name="io.sentry.traces.profiling.sample-rate" android:value="1.0" />
+
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${ADMOB_APP_ID}" />
 
     </application>
 

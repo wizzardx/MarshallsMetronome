@@ -1,5 +1,51 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 // import java.time.Duration
+import com.android.build.api.dsl.DefaultConfig
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.util.Properties
+
+/**
+ * Loads properties from the secure.properties file.
+ * @return Properties object loaded from the file.
+ * @throws GradleException if secure.properties file does not exist.
+ */
+
+fun loadSecureProps(): Properties {
+    val props = Properties()
+    val file = rootProject.file("secure.properties")
+    if (!file.exists()) throw GradleException("Please populate secure.properties")
+    props.load(file.inputStream())
+    return props
+}
+
+// Load secure properties from the secure.properties file
+val secureProps = loadSecureProps()
+
+/**
+ * Retrieves a property value from secure properties.
+ * @param key The key of the property to retrieve.
+ * @return The value of the property.
+ * @throws GradleException if the key is not found in secure.properties.
+ */
+fun getProperty(key: String): String =
+    secureProps.getProperty(key) ?: throw GradleException("$key not found in secure.properties")
+
+/**
+ * Sets a field in the BuildConfig file from secure properties.
+ * @param defaultConfig The DefaultConfig scope from the Android Gradle DSL.
+ * @param key The key of the property to be set in BuildConfig.
+ */
+fun setBuildConfigField(defaultConfig: DefaultConfig, key: String) {
+    defaultConfig.buildConfigField("String", key, "\"${getProperty(key)}\"")
+}
+
+/**
+ * Sets a placeholder in the AndroidManifest.xml file from secure properties.
+ * @param defaultConfig The DefaultConfig scope from the Android Gradle DSL.
+ * @param key The key of the property to be set as a manifest placeholder.
+ */
+fun setManifestPlaceholder(defaultConfig: DefaultConfig, key: String) {
+    defaultConfig.manifestPlaceholders[key] = getProperty(key)
+}
 
 plugins {
     id("com.android.application")
@@ -24,12 +70,20 @@ android {
         minSdk = 24
         targetSdk = 33
         versionCode = 1
-        versionName = "1.5"
+        versionName = "1.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // BuildConfig fields
+        setBuildConfigField(this, "ADMOB_AD_UNIT_ID")
+        setBuildConfigField(this, "TEST_DEVICE_IDS")
+
+        // Manifest Placeholders
+        setManifestPlaceholder(this, "ADMOB_APP_ID")
+        setManifestPlaceholder(this, "SENTRY_DSN")
     }
 
     buildTypes {
@@ -51,6 +105,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.4"
@@ -111,6 +166,10 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
 
     implementation("io.sentry:sentry-android:6.34.0")
+
+    // "Add Dependencies: In your app's build.gradle file, include the necessary dependencies for
+    // Google Mobile Ads SDK."
+    implementation("com.google.android.gms:play-services-ads-lite:22.5.0")
 }
 
 tasks.withType<KotlinCompile>().configureEach {

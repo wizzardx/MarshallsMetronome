@@ -1,0 +1,9 @@
+# Admob ID details (Replace with actual values):
+ADMOB_AD_UNIT_ID=your_admob_ad_unit_id_here
+ADMOB_APP_ID=your_admob_app_id_here
+
+# Sentry DSN (Replace with your project's DSN from Sentry):
+SENTRY_DSN=your_sentry_dsn_here
+
+# Comma-separated list of Test Device IDs (Replace with actual device IDs):
+TEST_DEVICE_IDS=your_comma_separated_test_device_ids_here

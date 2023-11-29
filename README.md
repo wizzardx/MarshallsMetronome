@@ -25,3 +25,13 @@ Developed using Android Studio, with assistance from tools like GitHub Copilot f
 Thank you for taking the time to look at "Marshall's Metronome." For more information about my work and other projects, visit my [GitHub Profile](https://github.com/wizzardx/).
 
 For questions, feedback, or bug reports related to this app, please feel free to open an issue in the [GitHub repository](https://github.com/wizzardx/MarshallsMetronome/issues).
+
+## For Developers
+If you're interested in contributing to the development of "Marshall's Metronome," please note the following requirements:
+
+- **Sentry Account**: For error tracking and monitoring.
+- **Firebase Account**: For analytics and crash reporting.
+- **AdMob Account**: For integrating and managing advertisements.
+- **Configuration File**: Use `secure.properties.example` as a template to create your own `secure.properties` file with necessary API keys and IDs from the above accounts.
+
+These accounts and configurations are essential for full functionality and testing of the app.
