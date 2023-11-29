@@ -1,6 +1,7 @@
 // import java.time.Duration
 import com.android.build.api.dsl.DefaultConfig
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.io.FileNotFoundException
 import java.util.Properties
 
 /**
@@ -88,7 +89,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Enables code shrinking, obfuscation, and optimization for only
+            // your project's release build type. Make sure to use a build
+            // variant with `isDebuggable=false`.
+            isMinifyEnabled = true
+
+            // Enables resource shrinking, which is performed by the
+            // Android Gradle plugin.
+            isShrinkResources = true
+
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -188,4 +197,42 @@ tasks.withType<Test> {
 
 tasks.withType<JavaCompile> {
 //     options.compilerArgs.add("-Xdebug")
+}
+
+tasks.register("renameApk") {
+    doLast {
+        println("Starting renameApk task")
+
+        val versionName = project.android.defaultConfig.versionName
+        val apkDirectory = File("${project.rootDir}/app/release/")
+        val apkFiles = apkDirectory.listFiles { _, name -> name.endsWith(".apk") }
+
+        if (apkFiles == null || apkFiles.isEmpty()) {
+            throw FileNotFoundException("No APK files found in ${apkDirectory.absolutePath}")
+        }
+        if (apkFiles.size > 1) {
+            throw Exception("Multiple APK files found in ${apkDirectory.absolutePath}. Expected only one.")
+        }
+
+        val apkFile = apkFiles.first()
+        val newFileName = "MarshallsMetronome_$versionName.apk"
+        val targetPath = "${project.rootDir}/app/build/outputs/apk/release/$newFileName"
+        val newFile = File(targetPath)
+
+        if (newFile.exists()) {
+            println("Deleting existing file: ${newFile.absolutePath}")
+            newFile.delete()
+        }
+
+        if (apkFile.exists()) {
+            println("APK found at: ${apkFile.absolutePath}")
+            apkFile.copyTo(newFile, overwrite = true)
+            println("File copied to: ${newFile.absolutePath}")
+        } else {
+            println("APK not found at: ${apkFile.absolutePath}")
+            throw FileNotFoundException("APK file not found")
+        }
+
+        println("Renaming complete. New file located at: ${newFile.absolutePath}")
+    }
 }

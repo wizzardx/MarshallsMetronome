@@ -34,3 +34,6 @@ google-services.json
 
 # Secrets to be kept outside of revision control:
 secure.properties
+
+# 'release'-variant apk files output by Android Studio over here:
+app/release/
