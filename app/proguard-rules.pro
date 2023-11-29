@@ -1,20 +1,21 @@
 # Add project specific ProGuard rules here.
+# You can control the set of applied configuration files using the
+# proguardFiles setting in build.gradle.
+#
+# For more details, see
+#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# Preserve line numbers and source file names
--keepattributes SourceFile,LineNumberTable
+# If your project uses WebView with JS, uncomment the following
+# and specify the fully qualified class name to the JavaScript interface
+# class:
+#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
+#   public *;
+#}
 
-# Disable obfuscation to keep the code readable
--dontobfuscate
+# Uncomment this to preserve the line number information for
+# debugging stack traces.
+#-keepattributes SourceFile,LineNumberTable
 
-# Disable optimization (optional, based on your preference)
-# -dontoptimize
-
-# Keep specific classes, methods, or fields if necessary
-#-keep class com.example.MyClass { *; }
-#-keep class * implements com.example.MyInterface
-#-keep class * extends com.example.MySuperClass
-
-# Add specific rules for third-party libraries here
-
-# # You can specify any path and filename.
-# -printconfiguration /tmp/full-r8-config.txt
+# If you keep the line number information, uncomment this to
+# hide the original source file name.
+#-renamesourcefileattribute SourceFile

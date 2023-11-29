@@ -89,15 +89,7 @@ android {
 
     buildTypes {
         release {
-            // Enables code shrinking, obfuscation, and optimization for only
-            // your project's release build type. Make sure to use a build
-            // variant with `isDebuggable=false`.
-            isMinifyEnabled = true
-
-            // Enables resource shrinking, which is performed by the
-            // Android Gradle plugin.
-            isShrinkResources = true
-
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -204,7 +196,7 @@ tasks.register("renameApk") {
         println("Starting renameApk task")
 
         val versionName = project.android.defaultConfig.versionName
-        val apkDirectory = File("${project.rootDir}/app/release/")
+        val apkDirectory = File("${project.rootDir}/app/build/outputs/apk/debug/")
         val apkFiles = apkDirectory.listFiles { _, name -> name.endsWith(".apk") }
 
         if (apkFiles == null || apkFiles.isEmpty()) {
@@ -216,7 +208,7 @@ tasks.register("renameApk") {
 
         val apkFile = apkFiles.first()
         val newFileName = "MarshallsMetronome_$versionName.apk"
-        val targetPath = "${project.rootDir}/app/build/outputs/apk/release/$newFileName"
+        val targetPath = "${project.rootDir}/app/build/outputs/apk/debug/$newFileName"
         val newFile = File(targetPath)
 
         if (newFile.exists()) {
